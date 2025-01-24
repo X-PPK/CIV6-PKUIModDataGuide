@@ -3,48 +3,58 @@
 - **作者：皮皮凯(PiPiKai)**
 - **时间：2025.1.20**
 ---
-本文档旨在阐述《文明6》中皮凯UI框架mod下的“mod本地数据存储子框架”的使用方法。该框架允许每个mod拥有独立的持久化数据存储，这些数据能够跨游戏对局保存，存储于玩家的本地电脑中。以下提供的详细使用指南旨在帮助那些决定采用此框架的mod开发者们，能够轻松掌握并有效地运用这一工具。  
+本文档旨在阐述《文明6》中皮凯UI框架mod下的“mod本地数据存储子框架”的使用方法。该框架允许每个mod拥有独立的持久化数据存储，这些数据能够跨游戏对局保存，存储于玩家的本地电脑中。以下提供的详细使用指南旨在帮助那些决定采用此框架的mod开发者们，能够轻松掌握并有效地运用这一工具。
 以下内容中提到的“框架”，均指该子框架部分。
 
+---
 ## 二. 框架设计概述
-### 1. 数据存储原理
+本部分将介绍框架的设计原因和优势，帮助理解其核心功能和目的。
+### 1. 数据存储/读取方式
 - **集中存储**：框架采用集中式数据存储机制，所有mod数据均存储在一个“配置存档”中。游戏启动并进入主菜单时，框架会自动读取该“配置存档”中的数据。
-- **数据同步**：读取的数据会被同步至相应的Lua脚本变量，确保游戏中的数据状态是最新的。同时，框架会生成LuaEvents和ExposedMembers等API，以便mod开发者能够便捷地在其他lua脚本中进行数据操作。
-### 2. 设计缘由
-- **避免冲突**：若每个mod各自使用独立的“配置存档”，则不仅会增加数据读取时间，还可能在加载时发生冲突，因为同一时间只能加载一个配置存档。
+- **数据读取**：读取的数据会被同步至相应的Lua脚本变量，确保让使用框架的mod获取正确的数据。同时，框架会生成LuaEvents和ExposedMembers等API，以便mod开发者能够便捷地在其他lua脚本中进行数据操作。
+### 2. 设计框架管理缘由
+- **避免冲突**：若每个mod各自使用独立的“配置存档”，则不仅会增加数据读取时间，还可能在加载时发生冲突，因为同一时间只能加载/保存一个配置存档。
+- **减小存储占用**：由于“配置存档”包含大量非必要的其他数据，若每个mod单独存储，将浪费存储空间。集中存储可以有效利用空间。
 - **统一管理机制**：为了避免上述问题，框架采用统一的管理机制和存储来处理所有mod的数据，确保数据的一致性和系统的稳定性。
 ### 3. 统一管理优势
 - **一致性保障**：通过框架统一管理，可以保持数据的一致性，避免因数据分散而导致的混乱。
+- **更可靠稳定性**：统一管理有助于维持数据稳定性，减少意外干扰，避免不同mod间的数据处理引发冲突和BUG。
 - **规范化约束**：这种做法不仅是一种规范化的约束，也有助于mod开发者更有效地管理本地数据，减少不同mod之间的相互干扰。
 ### 4.额外补充
-- **框架lua环境**:框架是跨越游戏前端环境和InGame环境的，而前端是没有GameLua环境的，因此框架的lua环境是UILua环境,同时mod开发者要注意数据在前端和InGame环境的不同处理程序
-- **我的期望**：框架提供很多便利的API，旨在为mod开发者提供更广阔的创作空间和开发效率，同时也为玩家带来更加愉悦的游戏体验。
-- **开放反馈**：我们欢迎任何建议和反馈，以不断优化框架，使其更好地服务于mod开发者和玩家社区。  
+- **框架lua环境**:框架是跨越游戏前端环境和InGame环境的，而前端是没有GameLua环境的，因此框架的lua环境是UILua环境，同时mod开发者要注意数据在前端和InGame环境的不同处理程序
+- **我的期望**：框架提供很多便利的API，旨在扩展mod开发者的创作空间和提升开发效率，同时为玩家带来更佳体验。
+- **开放反馈**：我欢迎任何建议和反馈，以不断优化框架，使其更好地服务于mod开发者和玩家社区。  
 - **PS**：我会在本指南记中尽量使用通俗易懂的语言来讲解，因此在专业术语上可能会有所欠缺，我会尽可能并提供一些示例代码，供大家参考。  
-会涉及到lua的setmetatable定义的Lua表，在Lua中，虽然从严格的编程语言理论角度来说，使用setmetatable定义的表不能被称为“类”，因为Lua采用的是基于原型的继承模型而非传统的类继承模型。  
-然而，为了在Lua中实现类似面向对象编程中的“类”功能，setmetatable是主要的机制。  
-因此我个人更习惯叫它'类'或者'伪类',在后续指南中我也会这样称呼它。
+在Lua中，使用setmetatable设置的表虽非传统“类”，但为实现面向对象编程，常被视为“类”或“伪类”，后续指南中将沿用此称呼。
 
-最后通过本指南的说明，我希望能够帮助mod开发者和玩家更好地理解框架的设计意图和使用规范，从而更加高效和安全地使用该框架。
+通过本指南，我们希望帮助mod开发者和玩家深入理解框架的设计意图和使用规范，从而高效、安全地利用该框架。
 
+---
 ## 三.框架结构概述
 本框架被划分为两个主要子部分，以满足不同类型的数据存储需求：
 ### 1. Mod配置数据管理
 - **功能定位**：这部分专注于管理mod的设置和配置数据，这些数据是mod开发者提供给玩家的，允许玩家根据个人偏好进行自定义。这些配置数据通常涉及游戏界面、控制选项、等可调整的参数。
-- **API支持**：框架提供了全面的API支持，简化了配置数据的处理过程。mod开发者只需要提供设置的键（key）和默认值以及发生更改时使用的回调函数。而无需设定对应UI和数据更改/保存逻辑，这些框架会已经帮你处理好。
+- **API支持**：框架提供了全面的API支持，简化了配置数据的处理流程。mod开发者只需要提供设置的键（key）和默认值以及发生更改时使用的回调函数。而无需编写对应UI和数据更改/保存逻辑，这些框架会已经帮你处理好。
 - **数据更改/保存逻辑**：当玩家通过UI更改设置时，框架自动处理数据的更新和保存，确保玩家自定义的设置能够即时生效并持久保存。
 ### 2. Mod非配置数据管理
 - **功能定位**：这部分负责处理mod的非配置数据，即那些不直接暴露给玩家设置的数据。
 - **API提供**：框架同样提供了设置默认值、更改数据和保存数据的API，但与配置数据不同的是，这些数据的具体操作需要mod开发者自行定义和实现。
 - **自定义操作**：开发者可以根据mod的具体需求，定义数据的存储、更改等操作。例如，可以用于记录领袖的挑战进度、实现跨存档的能力解锁等，为开发者提供了极大的灵活性和创造空间。
 通过这种结构设计，框架既能够满足玩家对配置数据自定义的需求，又能够为mod开发者提供处理复杂游戏状态的强大工具，从而共同提升游戏体验和扩展游戏的可玩性。
+### 3. 框架中Mod数据的结构
+- **数据结构**：框架本质是Lua表，CurrentlyModDatas子表负责存储当前所有mod的数据。每个使用框架的mod在CurrentlyModDatas中都有一个{_localData={}, _snycData={}}结构的子表，用于存储数据，并且这个子表拥有元表属性。
+- **元表属性**：该表的元表属性允许以表为对象添加参数，自动根据键值分配到_localData或_snycData中。例如，当设置CurrentlyModDatas[modkey][key] = value时，若键以"_"开头，则自动分配到_snycData；否则分配到_localData。具体细节后续会详细讲解
+- **_snycData**：存储需要在联机游戏中同步的数据。框架在联机游戏中自动同步这些数据，具体操作将在后续联机指南中详细讲解。
+- **_localData**：存储无需同步的数据。框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步，
 
-
+---
 ## 四.框架的使用
-- 这里我的讲述应该会不是很规整，想到一点整理一点，后续或许会慢慢完善。
+本部分将介绍如何使用框架，内容可能会逐步完善，请根据以下步骤操作。
 ### 1. 框架引入
-首先，确保您的模组（mod）向框架注册，游戏数据库中填写ModDataIds表，这是必要的，因为：
-- **避免ID冲突**：因为如果在lua直接添加对应的这些参数，一旦不同mod使用相同ID会导致mod互相干扰问题，所以在SQLite数据库中实施ModId和DataId的唯一性约束，可以在数据插入阶段就进行初步的ID检查，从而成功避免潜在的冲突。
+首先，确保您的模组（mod）向框架注册。需要在游戏数据库中填写ModDataIds表，这是至关重要的，原因如下：
+- **避免ID冲突**：因为直接在Lua中添加参数可能导致不同mod使用相同ID，从而引起干扰。通过在SQLite数据库中实施ModId和DataId的唯一性约束，可以在数据插入阶段进行初步的ID检查，有效避免潜在的冲突。
+
+以下是在数据库中插入ModDataIds的SQL和XML示例：
 
 ```Sql
 -- Sql 演示
@@ -63,31 +73,113 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > 
 > 列名 | 说明
 > --- | ---
-> ModId | 这是你的mod的唯一标识，即你在modinfo文件中使用的Mod id。
-> DataId | 本地数据ID，用于在lua中操作数据。<br>**注意**：DataId应当只包含字母数字和下划线<br>因为框架会根据这个ID> 定义对应的LuaEvents，以便在lua中进行数据操作，具体使用方法将在后面介绍。
+> ModId | 您的mod的唯一标识，即您在modinfo文件中使用的Mod id。
+> DataId | 本地数据ID，用于在Lua中操作数据。<br>注意：DataId应当只包含字母数字和下划线，因为框架会根据这个ID定义对应的LuaEvents，以便在Lua中进行数据操作，具体使用方法将在后面介绍。
 > Version | 代表的是mod数据的版本号，而非mod本身的版本。<br>当您的mod需要进行数据更新时，必须更新这个版本号。<br>框架会根据这个版本号来决定是否应该覆盖现有的数据。<br>在默认情况下，框架会继续使用之前存储的数据来填充Lua变量，只有在版本号发生变化时，才会进行数据覆盖。<br>Lua还提供了一套接口，用于在版本更新时根据旧数据执行必要的更新操作。关于如何使用这些接口的详细说明，将在后续章节中提供。
 > </details>
 
 ### 2. 框架lua使用前言
-- 框架的数据直接使用环境是在游戏的UI-lua环境中，因此需要使用UIlua来操作数据
-- > 关于框架Mod数据保存:  
-如果是属于'配置数据'（既使用几个"Add...ParamUI"API注册过的key的对应数据）可以放心，当玩家对这些数据进行更改时，框架会自动保存更改后的数据。  
-如果是属于'非配置数据'（既没有使用几个"Add...ParamUI"API注册过的key的对应数据）那么是分情况的：  
-  > - 如果是前端环境，需要在自己Mod所有数据都更改完成后，手动调用保存数据的API。  
-  > - 而在InGame环境，每当保存游戏存档发生时，框架都会自动保存当前所有mod的数据（当然也会留有主动保存的API）。
-  >
-  > 由于数据存储设是保存在一个配置存档中，每次保存时都需要将所有mod数据写入这个配置文件。如果频繁地进行保存操作，很可能会造成性能的大量消耗，并干扰玩家的正常游戏体验。因此，减少数据的频繁保存是必要的，采取了这样的设计策略。  
-- 关于如何在你的lua脚本中使用框架的数据呢？有多种方式
-- 一些参数的说明：
+在使用框架进行Lua脚本开发之前，以下是一些重要的前提和指南。  
+- **框架数据使用环境**：框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。
+#### Mod数据键值命名规范**
+- 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}}, 以下简称该结构为“Mod数据表”。
+- Mod数据表存储于框架的 CurrentlyModDatas 子表中，键值是由 ModUUID 生成唯一的字符串标识 ModKey。
+- 可以通过框架直接访问Mod数据：MLDM.CurrentlyModDatas[modKey]。
+
+Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表结构。以下为具体实现示例：
+> <details><summary>具体表现例子</summary>
+> 
+> ```lua
+> local modData = MLDM.CurrentlyModDatas[modKey]
+> 
+> -- 以下是对modData的操作
+> modData['key1'] = 'value1' -- 会自动分配到_localData，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+> print(modData['key1']) -- 直接输出 'value1'
+> modData['_key1'] = 'value2' -- 会自动分配到_snycData，此时modData = {_localData={key1 = 'value1'}, _snycData={_key1 = 'value2'}}
+> print(modData['_key1']) -- 直接输出 'value2'
+> -- 当你想要遍历自己modData时，不要直接使用 pairs
+> for k, v in pairs(modData) do
+>     print(k, v)
+> end
+> -- 输出：_localData table: 0x12345678
+> --       _snycData table: 0x87654321
+> -- 应当如下遍历
+> for k,v in modData() do
+>     print(k, v)
+> end
+> -- 输出：key1 value1
+> --       _key1 value2
+> 
+> modData['key2'] = 'value3' -- 此时有3个数据
+> 
+> -- 想要获取当前modData的长度时，不要使用 # 或table.count，而是使用modData(true)函数
+> print(#modData) -- 输出 0 因为modData不是数组表，#返回0
+> print(table.count(modData)) -- 输出 2 同上,是_localData和_snycData这两个元素的数量
+> print(table.count(modData(true))) -- 输出 3 会获得_localData子表和_snycData子表的总数量
+> ```
+> </details>
+
+此设计旨在简化数据管理，同时兼顾联机模式下的同步数据快速管理以及单机模式下的数据统一管理。
+> <details><summary>元表源码</summary>
+> - 这也是一个很好的学习lua元表的例子(给lua萌新的建议)
+> - 一种数据管理方案，直接根据键值不同对数据进行分配，同时又能兼顾整体数据（好吧跑题了，哈哈）
+> 
+> ```lua
+>    -- 省略代码...
+>    local function iterator(tbl1, tbl2) -- 通过__index和__newindex已经约束两个表不会有相同键值存在，因此这里无需检测键值对相同情况
+>     -- 初始化两个表的键迭代器
+>     local next1, next2 = next, next
+>     local k, v, state = nil, nil, 1 -- 状态: 1 时 syncData, 2 时 localData
+> 
+>     return function()
+>       if state == 1 then
+>         k, v = next1(tbl1, k)
+>         if k ~= nil then return k, v end
+>         state = 2
+>       end
+>       k, v = next2(tbl2, k)
+>       return k, v
+>      end
+>    end
+>    -- 省略代码...
+>     ModDataMetatable = { -- 构建mod数据表的元表
+>       -- 当访问一个表中不存在的键时, 应当到_syncData和_localData检查数据
+>       __index = function(t, k) return k:sub(1, 1) == "_" and t._syncData[k] or t._localData[k] end,
+>       -- 当表中的一个不存在的键赋值时，自动根据是否以_开头来判断是否是同步数据，如果是则添加到_syncData中,不是加入到_localData中
+>       __newindex = function(t, k, v)
+>         if k:sub(1, 1) == "_" then
+>           t._syncData[k] = v
+>         else 
+>           t._localData[k] = v
+>         end
+>       end,
+>       -- 文明6的lua应该是lua5.1改编的版本，不支持__pairs和__len这两个元方法
+>       --__pairs = function(t) return iterator(t._syncData, t._localData) end, -- 返回合并的迭代器
+>       --__len = function(t) return table.count(t._syncData) + table.count(t._localData) end, -- 返回总长度
+>       -- 这里使用__call来实现__pairs和__len两个元方法功能
+>       __call = function(t, isLen:boolean) return isLen and (table.count(t._syncData) + table.count(t._localData)) or iterator(t._syncData, t._localData) end, -- 返回合并的迭代器// 返回总长度
+>     },
+>     -- 省略代码...
+> ```
+> </details>
+#### 关于框架Mod数据保存：
+- **配置数据**：对于通过"Add...ParamUI" API注册的配置数据，框架会自动保存玩家所做的更改。  
+- **非配置数据**：非配置数据的保存则需要根据环境不同而有所不同。
+  - **前端环境**：在所有数据更改完成后，需要手动调用保存数据的API。
+  - **游戏内(InGame)环境**：框架会在保存游戏存档时自动保存所有mod数据，同时也提供了主动保存的API。
+
+由于所有mod数据都存储在一个配置存档中，频繁的保存操作可能会影响性能和游戏体验，因此建议减少不必要的频繁保存。
+ 
+#### 如何在Lua脚本中使用框架数据：
+有多种方式可以在Lua脚本中使用框架数据，以下是一些关键参数的说明：
   - modUUID：mod的唯一标识，既你的Mod的modinfo文件中的ModId
   - modKey：mod的本地数据存储key，是由modUUID生成的唯一对应的字符串
 
-**第一种**：是直接使用框架构造的LuaEvents来与框架进行交互的
-- 这部分API，可以直接被其他UI的lua使用，当然也包括你定义的'ModLocalDataManager_脚本'使用
-- 至于'ModLocalDataManager_脚本'是什么接着往下看
+**第一种**：是直接使用框架构造的LuaEvents等可以跨UI调用的方法来与框架进行交互的
+- 这些API可以被其他UI Lua脚本使用，包括你定义的'ModLocalDataManager_'脚本。
 
-**第二种**：是直接将你自己的lua脚本文件引入到框架的lua中，这样框架会自动加载并执行你的脚本
-- 如果您具有高级Lua编程技能，也许可以直接通过查看我的lua源代码，使用这种方法你可以直接针对框架的进行操作，毕竟本框架本质是基于Lua表和setmetatable构建的伪类结构。
+**第二种**：将Lua脚本文件引入框架，让框架会自动加载并执行你的脚本
+- 这种方法你可以直接针对框架的进行操作，毕竟本框架本质是基于Lua表和setmetatable构建的
   - 如果你真这样做，请确保不会影响到框架的稳定性和正常运行，以及考虑到其他Mod的兼容性，避免造成不必要的影响或破坏其他Mod的功能。
 > - 相关源代码：框架会先加载相关lua，包括你添加的'ModLocalDataManager_脚本'lua文件，在执行框架初始化
 > ```lua
@@ -97,8 +189,8 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > MLDM:init()
 > ```
 
-- 首先你需要定义一个lua脚本文件，并且这个lua脚本的命名需要规范为是'ModLocalDataManager_'开头的lua文件
-- 同时在modinfo文件中，你需要采用ImportFiles来导入这个lua脚本
+- 首先你需要定义一个lua脚本文件，并且这个lua脚本的**命名需要规范为是'ModLocalDataManager_'开头的lua文件**
+- 同时在modinfo文件中，你需要采**用ImportFiles来导入这个lua脚本**
 > 对应演示
 > - 例如我定义的lua脚本文件为：ModLocalDataManager_Test.lua
 > - 命名符合'ModLocalDataManager_'开头
@@ -119,13 +211,12 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > <!-- 省略moinfo其他代码 -->
 > ```
 
-- 这样框架会自动加载这个脚本
-- 这种方式使用，你的脚本可以更加灵活的对自己的数据进行操作，同时通过构造你自己的LuaEvents来实现和自己其他UI的lua程序的交互
-- 我强烈推荐这种方式
+这样，框架会自动加载你的脚本，允许你更灵活地操作数据，并通过构造自己的LuaEvents与其他UI Lua脚本交互。
 - **注意**：框架的'配置数据管理'功能的相关API很多不是使用LuaEvents，因此要用到这个方法，具体后续我会讲解到
 
 ### 3. 框架Lua的API
-- 前面也说到，部分API不是LuaEvents，因此需要用到'UIlua直接使用'的方式来使用
+> - **重点**：
+- 前面也说到，部分API不是LuaEvents，因此需要将你自己的lua脚本文件引入到框架的lua中
 - 那么我们分开来讲吧
 
 #### 3.1 ModLocalDataManager_脚本API
@@ -171,7 +262,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 
 ##### a. GetKey
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
-- 用于获得mod的数据存储key，这个key是框架内部用来存储数据的唯一标识，可以用来操作数据
+- 用于获得mod数据在框架内存储使用的key，这个ModKey是框架内部用来存储数据的唯一标识，可以用来操作数据
 
 > 操作演示：
 > ```Lua
@@ -233,7 +324,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 
 ##### c. SaveConfig
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
-- 不要被这里"Config"误导，其实这里的字面意思是"保存配置存档"
+- 不要被这里"Config"误导，其实这里的意思是"保存配置存档"
 - 实际的功能是用于保存mod的数据，mod的数据会被框架一起存储到配置存档中，以便在下次启动游戏时，会自动读取之前存储的数据
 - **注意**：它虽然有一个参数saveID(string),但这个参数是框架内部使用的，请不要使用它。  
 其他具体注意细节在前面的"**2. 框架lua使用前言**"有说明。
@@ -244,6 +335,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > ```
 
 > <details><summary>相关源码</summary>
+> 
 > ```Lua
 >   -- 注意： saveID是框架内部使用的，请Mod开发者注意不要使用它，保持saveID=nil即可
 >   SaveConfig = function(self, saveID:string)
@@ -256,7 +348,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 >       local EMMDC = ExposedMembers.ModDataCache
 >       local Traversed = table.count(EMMDC) > 0 and EMMDC or self.CurrentlyModDatas
 >       for k, v in pairs(Traversed) do
->         GameConfiguration.SetValue(k, v) --每个mod单独一个配置ID存储
+>          GameConfiguration.SetValue(k, serializeAndSplitToStringTable({_localData = v._localData, _syncData = v._syncData}))
 >       end
 >       if not saveID then
 >         Events.SaveComplete.Add(function(eResult, eType, eOptions, eFileType )
@@ -336,18 +428,26 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 >       GetParams = function()
 >         return self.CurrentlyModDatas[key]
 >       end,
->       SetParam = function(value1, value2)
+>       SetParam = function(iKey, value)
 >           -- 确保 value1 是一个字符串或数字
->         if type(value1) ~= "string" and type(value1) ~= "number" then
+>         if type(iKey) ~= "string" and type(iKey) ~= "number" then
 >           print("The first argument must be a string or number key.")
 >         end
-> 
->         self.CurrentlyModDatas[key][value1] = value2
+>         -- 禁止使用_localData 和 _syncData 为key
+>         if key == '_localData' or key == '_syncData' then
+>           print("Can't set param for _localData or _syncData.", iKey, value)
+>           return
+>         end
+>         self.CurrentlyModDatas[key][iKey] = value
 >       end,
 >       SetParams = function(t:table)
 >         -- 批量设置参数模式：当 value1 是一个表时
 >         for k, v in pairs(t) do
->           self.CurrentlyModDatas[key][k] = v
+>           if k == '_localData' or k == '_syncData' then
+>             print("Can't set params for _localData or _syncData.", k, v)
+>           else
+>             self.CurrentlyModDatas[key][k] = v
+>           end
 >         end
 >       end,
 >       -- 弃用，直接在sql注册对应的version和DataId
@@ -406,7 +506,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 >       end,
 >       ]]
 >     }
->     -- 设置嵌套伪类, 便于使用, 对象直接可以访问 getParams 和 setParams 方法
+>     -- 设置元表, 便于使用, 对象直接可以访问 getParams 和 setParams 方法
 >     setmetatable(internalObj, { __index = methods })
 >     return internalObj
 >   end,
@@ -615,7 +715,8 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 - 不知道你是否还记得前面ModDataIds的DataId，很快要用到它
 
 > <details><summary>部分相关源码</summary>
-> ```Lua
+> 
+>```Lua
 > CreateModConfigUIs = function(self)
 >   -- 完成初始化
 >   LuaEvents.MLDM_ConfigUIStart()
