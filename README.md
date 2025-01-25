@@ -68,8 +68,7 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
     <Row ModId="7b7bda2b-f6e2-45d2-ba05-bbeb4bd9c46a" DataId="PK_Test" Version="1" />
 </ModDataIds>
 ```
-> <details>
-> <summary>ModDataIds表的字段说明</summary>
+> <details><summary>ModDataIds表的字段说明</summary>
 > 
 > 列名 | 说明
 > --- | ---
@@ -81,13 +80,24 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 ### 2. 框架lua使用前言
 在使用框架进行Lua脚本开发之前，以下是一些重要的前提和指南。  
 - **框架数据使用环境**：框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。
-#### Mod数据键值命名规范**
+#### Mod数据表及键值规范**
 - 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}}, 以下简称该结构为“Mod数据表”。
 - Mod数据表存储于框架的 CurrentlyModDatas 子表中，键值是由 ModUUID 生成唯一的字符串标识 ModKey。
 - 可以通过框架直接访问Mod数据：MLDM.CurrentlyModDatas[modKey]。
+> **命名规范要点**：mod开发者在使用Mod数据表进行键值赋值时，必须遵循以下命名规则： (原因参考下面给与mod数据表的元表属性) 
+> - 键值前缀规范:  
+>   - 若键值以“_”开头，则自动分配到_snycData，即同步数据, 框架在联机游戏中自动同步这些数据。  
+>   - 若键值不以“_”开头，自动分配到_localData，即非同步数据, 框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步。 
+> - 禁止使用的键值：   
+>   - 请勿使用“_localData”或“_syncData”作为键值，除非您的意图是直接修改Mod数据表的 _localData 和 _syncData 子表本身。  
+> - 保持Mod数据表结构：  
+>   - 如果您确实需要替换 _localData 或 _syncData 子表，请确保不改变它们的数据类型。维持正确的数据类型是确保元表属性正常运作的关键。
+>   - 不要使用rawset添加赋值,它会忽略元表的__newindex元方法，直接赋值到Mod数据表，会有潜在键值相同导致数据更改/获取错误。
+>  
+> 遵守以上规范将有助于确保Mod数据表的功能性和稳定性，避免潜在的运行时错误。
 
 Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表结构。以下为具体实现示例：
-> <details><summary>具体表现例子</summary>
+> <details><summary>Mod数据表的元表-应用例子</summary>
 > 
 > ```lua
 > local modData = MLDM.CurrentlyModDatas[modKey]
@@ -116,11 +126,26 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > print(#modData) -- 输出 0 因为modData不是数组表，#返回0
 > print(table.count(modData)) -- 输出 2 同上,是_localData和_snycData这两个元素的数量
 > print(table.count(modData(true))) -- 输出 3 会获得_localData子表和_snycData子表的总数量
+>
+> modData['_snycData'] = {} -- 直接修改_snycData子表，清空原有同步表数据，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+>
+> -- 下面是错误的示范1：
+> -- 不要这样作 因为_syncData和_localData是框架预留的关键字，它的在mod数据表中的类型应当是表
+> modData['_localData'] = 1 -- 此时modData = {_localData=1, _snycData={}} -- _localData错误的类型，应当是表
+> -- 此时在给mod数据表进行赋值，会在调用元表的__newindex元方法触发报错，因为_localData的类型已经不是表，无法添加数据
+> modData['key3'] = {1,2,3}
+>
+> -- 下面是错误的示范2：
+> modData['_localData'] = {key1 = 'value1'} -- 先恢复正确的mod数据表，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+> -- 不要使用rawset来赋值，因为这样会忽略元表的__newindex元方法，直接赋值到Mod数据表，会有潜在键值相同导致数据更改错误
+> rawset(modData, 'key1', 'value0') -- 此时 modData = {_localData={key1 = 'value1'}, _snycData={}, key1 = value0}
+> print(modData['key1']) -- 输出 'value0' ,键值查询也不会调用__index元方法
 > ```
 > </details>
 
 此设计旨在简化数据管理，同时兼顾联机模式下的同步数据快速管理以及单机模式下的数据统一管理。
 > <details><summary>元表源码</summary>
+> 
 > - 这也是一个很好的学习lua元表的例子(给lua萌新的建议)
 > - 一种数据管理方案，直接根据键值不同对数据进行分配，同时又能兼顾整体数据（好吧跑题了，哈哈）
 > 
@@ -162,6 +187,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 >     -- 省略代码...
 > ```
 > </details>
+
 #### 关于框架Mod数据保存：
 - **配置数据**：对于通过"Add...ParamUI" API注册的配置数据，框架会自动保存玩家所做的更改。  
 - **非配置数据**：非配置数据的保存则需要根据环境不同而有所不同。
@@ -514,6 +540,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > </details>
 
 > <details><summary>相关API</summary>
+>
 > 这里也有 SetIgnoreModVersionUpdates
 > 但和上面不同，这里是直接ModData设定该mod数据是否"忽略版本更新"，而上面还需要提供modUUID参数
 > 
@@ -654,8 +681,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > > TestModObject.AddSubpanelUI("测试子面板1设置", "测试子面板1描述", 1)
 > > ```
 > > ![对应效果](图片\3.png "添加了一个子面板，并设定了名字和提示") 
-> > <details>
-> > <summary>AddSubpanelUI不设置的效果</summary>
+> > <details><summary>AddSubpanelUI不设置的效果</summary>
 > > 
 > > ```Lua
 > > -- TestModObject.AddSubpanelUI("高级设置", "显示高级设置", 1)
