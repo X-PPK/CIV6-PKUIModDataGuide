@@ -10,8 +10,8 @@
 > - 感谢'[号码菌Synora](https://steamcommunity.com/profiles/76561198147378701)' 帮我解答了一些技术难题，减少了我研究联机同步时验证官方API的时间，让我能更高效地推进项目进度。
 > - 感谢'[UzukiShimamura卯月](https://steamcommunity.com/profiles/76561198402598762)' 在我实现这个框架过程中提供了许多具有建设性的建议和帮助，让我规避了许多未曾考虑到的问题，大大提高了项目的稳定性。
 > - 感谢'[夏凉凉凉](https://steamcommunity.com/profiles/76561199052584728)' 告知ExposedMembers可以实现前端数据与InGame数据之间的交互，在此之前我只知道它可以实现InGame的Game环境和UI环境的lua交互。得益于他的帮助，我现在可以更加便捷地实现数据从前端传递到InGame，避免了采用更为复杂的方法。
-
 ---
+
 ## 二. 框架设计概述
 本部分将介绍框架的设计原因和优势，帮助理解其核心功能和目的。
 ### 1. 数据存储/读取方式
@@ -35,6 +35,7 @@
 通过本指南，我们希望帮助mod开发者和玩家深入理解框架的设计意图和使用规范，从而高效、安全地利用该框架。
 
 ---
+
 ## 三.框架结构概述
 本框架被划分为两个主要子部分，以满足不同类型的数据存储需求：
 ### 1. Mod配置数据管理
@@ -53,8 +54,11 @@
 - **_localData**：存储无需同步的数据。框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步，
 
 ---
+
 ## 四.框架的使用
-本部分将介绍如何使用框架，内容可能会逐步完善，请根据以下步骤操作。
+本部分将介绍如何使用框架，内容可能会逐步完善，请根据以下步骤操作。  
+
+框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。  
 ### 1. 框架引入
 首先，确保您的模组（mod）向框架注册。需要在游戏数据库中填写ModDataIds表，这是至关重要的，原因如下：
 - **避免ID冲突**：因为直接在Lua中添加参数可能导致不同mod使用相同ID，从而引起干扰。通过在SQLite数据库中实施ModId和DataId的唯一性约束，可以在数据插入阶段进行初步的ID检查，有效避免潜在的冲突。
@@ -116,11 +120,9 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > END;
 >```
 > </details>
+---
 
-### 2. 框架lua使用前言
-在使用框架进行Lua脚本开发之前，以下是一些重要的前提和指南。  
-- **框架数据使用环境**：框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。
-#### Mod数据表及键值规范：
+### 2. Mod数据表及键值规范
 - 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}}, 以下简称该结构为“Mod数据表”。
 - Mod数据表存储于框架的 CurrentlyModDatas 子表中，键值是由 ModUUID 生成唯一的字符串标识 ModKey。
 - 可以通过框架直接访问Mod数据：MLDM.CurrentlyModDatas[modKey]。
@@ -229,7 +231,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
 
-#### 关于框架Mod数据保存：
+### 3. 关于框架Mod数据保存
 - **配置数据**：对于通过"Add...ParamUI" API注册的配置数据，框架会自动保存玩家所做的更改。  
 - **非配置数据**：非配置数据的保存则需要根据环境不同而有所不同。
   - **前端环境**：在所有数据更改完成后，需要手动调用保存数据的API。
@@ -237,17 +239,17 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 
 由于所有mod数据都存储在一个配置存档中，频繁的保存操作可能会影响性能和游戏体验，因此建议减少不必要的频繁保存。
 
-#### 关于网络多人联机数据同步问题：
-- **数据影响评估**：Mod开发者应评估自己Mod数据使用中，是否会影响游戏联机同步。例如，仅用于玩家个性化自我展示的UI界面的配置数据不会影响同步，而Game环境Lua中不同玩家使用的数据则可能导致同步问题。
+### 4. 关于网络多人联机数据同步问题
+**数据影响评估**：Mod开发者应评估自己Mod数据使用中，是否会影响游戏联机同步。例如，仅用于玩家个性化自我展示的UI界面的配置数据不会影响同步，而Game环境Lua中不同玩家使用的数据则可能导致同步问题。
 
-- **官方API利用**：对于可能引起同步问题的数据，我们推荐使用官方API `UI.RequestPlayerOperation` 来确保数据的一致性。此API能够处理大多数同步需求。
-  - 实际也可以用于实现UI数据同步，只是需要先同步到Game环境在传到UI环境，但在前端联机房间中时不存在Game环境
+**官方API利用**：对于可能引起同步问题的数据，我们推荐使用官方API `UI.RequestPlayerOperation` 来确保数据的一致性。此API能够处理大多数同步需求。
+- 实际也可以用于实现UI数据同步，只是需要先同步到Game环境在传到UI环境，但在前端联机房间中时不存在Game环境
 
-- **本框架提供的API同步**：是直接UI环境进行同步，不需要Game环境参与。因此支持在前端联机房间中直接同步数据。
-  - 例如对于需要在前端联机房间UI界面直接展现玩家个性化称号。
+**本框架提供的API同步**：是直接UI环境进行同步，不需要Game环境参与。因此支持在前端联机房间中直接同步数据。
+- 例如对于需要在前端联机房间UI界面直接展现玩家个性化称号。
 
 在深入探讨本框架的同步机制之前，我们先简要介绍官方联机模式下的数据同步流程，以便mod开发者根据自身需求判断是否采用本框架的同步方案。
-##### 官方的联机
+#### 4.1 官方的联机
 以下是对官方联机模式下数据同步机制的理解，如有不准确之处，欢迎指正。
 - 要了解概念：游戏配置‘GameConfiguration’，地图配置‘MapConfiguration’，玩家配置‘PlayerConfiguration’，UI.RequestPlayerOperation等等。
 
@@ -321,7 +323,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
 
-##### 框架的同步机制
+#### 4.2 框架的同步机制
 本框架在设计初期未充分考虑同步问题，因此相关设计可能不尽完善。
 - **同步数据表**：每个mod数据表均包含一个_snycData子表，用于存储同步数据。框架将自动同步该子表数据至其他玩家游戏。
 - **个性化同步实现**：若mod开发者需实现个性化同步，可不必使用_snycData子表，而是自行编写同步逻辑（框架提供UI环境同步API）。框架仅负责同步_snycData子表数据。
@@ -514,7 +516,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-#### 如何在Lua脚本中使用框架数据：
+### 5. 如何在Lua脚本中使用框架数据
 有多种方式可以在Lua脚本中使用框架数据，以下是一些关键参数的说明：
   - modUUID：mod的唯一标识，既你的Mod的modinfo文件中的ModId
   - modKey：mod的本地数据存储key，是由modUUID生成的唯一对应的字符串
@@ -558,12 +560,14 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 这样，框架会自动加载你的脚本，允许你更灵活地操作数据，并通过构造自己的LuaEvents与其他UI Lua脚本交互。
 - **注意**：框架的'配置数据管理'功能的相关API很多不是使用LuaEvents，因此要用到这个方法，具体后续我会讲解到
 
-### 3. 框架Lua的API
+---
+
+## 五.框架Lua的API
 > - **重点**：
 - 前面也说到，部分API不是LuaEvents，因此需要将你自己的lua脚本文件引入到框架的lua中
 - 那么我们分开来讲吧
 
-#### 3.1 ModLocalDataManager_脚本API
+### 1. ModLocalDataManager_脚本API
 - 是非LuaEvents/ExposedMembers等等可以跨UIlua调用的API
 - 只能在你定义的'ModLocalDataManager_脚本'使用
 - **注意**：为了避免干扰其他人mod的lua脚本，你需要使用local局部声明来避免变量冲突
@@ -603,7 +607,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 
 接下来，我会依次介绍这些API的使用方法。
 
-##### a. GetKey
+#### 1.1 GetKey
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 用于获得mod数据在框架内存储使用的key，这个ModKey是框架内部用来存储数据的唯一标识，可以用来操作数据
 
@@ -633,7 +637,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > </details>
 
 
-##### b. SetIgnoreModVersionUpdates
+#### 1.2 SetIgnoreModVersionUpdates
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 作用是否开启 '忽略在ModDataIds定义的Version参数' 
   - 以便在每次启动游戏时，都会使用你lua脚本中定义的默认数据覆盖掉之前存储的数据
@@ -665,7 +669,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-##### c. SaveConfig
+#### 1.3 SaveConfig
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 不要被这里"Config"误导，其实这里的意思是"保存配置存档"
 - 实际的功能是用于保存mod的数据，mod的数据会被框架一起存储到配置存档中，以便在下次启动游戏时，会自动读取之前存储的数据
@@ -743,7 +747,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-##### d. IsMultiplayerRoom
+#### 1.4 IsMultiplayerRoom
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 用于判断当前是否是联机房间/联机的游戏中
 - 返回值：boolean，true表示当前是联机房间/联机的游戏中，false表示当前是不是联机房间/单机游戏
@@ -766,7 +770,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-##### e. GetLocalPlayerID
+#### 1.5 GetLocalPlayerID
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 用于获得当前本地玩家的ID
 - 返回值：number，当前本地玩家的ID
@@ -791,7 +795,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-##### f. SyncModDataToOtherPlayers
+#### 1.6 SyncModDataToOtherPlayers
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 用于同步指定Mod数据到其他玩家
 - 参数1：dataId：string/table，同步数据的ID，可以是字符串，也可以是table。如果是字符串，则同步一个modDataID对应mod的数据；如果是table，需要为数组表，数组中包含多个modDataID，同步多个对应mod的数据。
@@ -872,7 +876,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-##### g. GetModObject
+#### 1.7 GetModObject
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 他会返回一个"类"对象(setmetatable定义的Lua表)，是为了更方便大家管理自己mod数据而设计。  
 你可以使用这个对象来添加/定制属于你的Mod配置UI，或者进行非配置数据的操作。  
@@ -1017,7 +1021,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > 但和上面不同，这里是直接ModData设定该mod数据是否"忽略版本更新"，而上面还需要提供modUUID参数
 > 
 > 
-> ###### **基础API**
+> ##### **基础API**
 > 
 >  .或: | 名字 | 参数 | 返回 |说明
 > --- | --- | --- | --- | --- 
@@ -1028,7 +1032,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > . | GetParam | key(string/number) | param(string/number/table/nil) | 获取参数值，注意返回nil表示参数不存在
 > . | GetParams | - | params(table/nil) | 返回一个table是这个mod所有参数，注意返回nil表示参数不存在
 > 
-> ###### **Mod配置数据UI-API**
+> ##### **Mod配置数据UI-API**
 > (以下API用于创建和管理Mod的配置界面)  
 > **注意**：在使用几个Add~ParamUI时，不要忘记先执行前面的SetParam/SetParams，提前注册好对应的key和默认值
 > 
@@ -1204,13 +1208,12 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > </details>
 
 
-#### 3.2 跨UIlua脚本API
+### 2. 跨UIlua脚本API
 如果熟悉文明6的lua，我想说到跨UI-lua脚本的交互应该立马想到LuaEvents和ExposedMembes。  
 是的我们需要使用他们来完成跨UI-lua脚本的交互，同时还有一个独特的官方API也会被使用，请让我一点一点讲述  
 这里我们没有使用ExposedMembes，而是使用了LuaEvents。  
 因为ExposedMembes，更适合单机本地游戏，不适用于联机游戏。因为你无法获取联机游戏中对方的ExposedMembers。  
 
-##### a. LuaEvents
 - **注意**: 是在UI环境定义的的LuaEvents，你在Game环境无法使用这里的LuaEvents
 - 不知道你是否还记得前面ModDataIds的DataId，很快要用到它
 
@@ -1327,7 +1330,8 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > - 最后在InGame环境的联机游戏中时，部分mod数据很可能是影响游戏的关键数据，所以，我在框架设计了一种机制来实现数据的同步，是在联机存档开始前在联机房间中统一使用GameConfiguration.SetValue来同步数据，在联机房间中，其他mod也能获取到数据，并且在游戏结束后统一使用GameConfiguration.SetValue来同步数据。
 > - 具体的联机游戏中数据同步机制，请参考后面的联机游戏中注意事项部分。
 
-#### 3.3 联机数据的获取API
-- 已经在前面的'框架lua使用前言'中有说明，这里不再赘述
+### 3. 联机数据的获取API
+- 已经在前面的'四.框架的使用'的'4. 关于网络多人联机数据同步问题'中有说明，这里不再赘述
 
-最后，由于本框架的同步设计可能存在不完善之处，我们诚挚欢迎社区成员提供反馈和建议，以共同改进和优化同步机制。
+---
+**最后，由于本框架的设计可能存在不完善之处，我们诚挚欢迎社区成员提供反馈和建议，以共同改进和优化机制。**
