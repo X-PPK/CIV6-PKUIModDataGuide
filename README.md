@@ -97,29 +97,6 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 >     Version INTEGER NOT NULL DEFAULT 1
 >     -- EditEnvironment INTEGER NOT NULL DEFAULT -1 CHECK (EditEnvironment IN (-1, 0, 1)) -- 弃用，每个mod配置参数在lua设置环境
 > );
-> 
-> -- 创建触发器来限制 DataId 的字符类型
-> CREATE TRIGGER PK_Validate_DataId_Before_Insert
-> BEFORE INSERT ON ModDataIds
-> FOR EACH ROW
-> BEGIN
->     SELECT
->         CASE
->             WHEN NEW.DataId NOT GLOB '[a-zA-Z0-9_]*' THEN
->                 RAISE(ABORT, 'Invalid DataId for record "' || NEW.ModId || '": "' || NEW.DataId || '". DataId can only contain alphanumeric characters and underscores.')
->         END;
-> END;
-> 
-> CREATE TRIGGER PK_Validate_DataId_Before_Update
-> BEFORE UPDATE ON ModDataIds
-> FOR EACH ROW
-> BEGIN
->     SELECT
->         CASE
->             WHEN NEW.DataId NOT GLOB '[a-zA-Z0-9_]*' THEN
->                 RAISE(ABORT, 'Invalid DataId for record "' || NEW.ModId || '": "' || NEW.DataId || '". DataId can only contain alphanumeric characters and underscores.')
->         END;
-> END;
 >```
 > </details>
 ---
