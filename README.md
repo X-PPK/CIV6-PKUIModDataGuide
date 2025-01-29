@@ -1291,7 +1291,7 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > MLDM_ConfigUIComplete | 事件监听 | - | 通知其他mod脚本配置UI刷新完成，每次打开配置UI时，都会根据配置数据刷新UI，在刷新完成后，会调用这个事件
 > MLDM_AlmostComplete | 事件监听 | - | 通知其他mod脚本，框架几乎初始化完成，但加载Mod数据的屏幕还未关闭，可以正常获得各自Mod的数据了<br> 只在前端环境有触发
 > MLDM_InitComplete | 事件监听 | - | 通知其他mod脚本，框架初始化完成，可以正常获得各自Mod的数据了
-> MLDM_Saving | 事件触发 | - | 用于让框架对当前数据进行保存。<br>因为数据的存储是保存在配置存档中的，为了避免频繁的保存，所以每次发生数据修改不会自动立马保存，而需要Mod开发者在更改完成多个数据后，手动调用这个事件来保存数据。<br>以减小保存频率，提高性能。<br>具体注意细节在前面的"**2. 框架lua使用前言**"有说明。
+> MLDM_Saving | 事件触发 | - | 用于让框架对当前数据进行保存。<br>因为数据的存储是保存在配置存档中的，为了避免频繁的保存，所以每次发生数据修改不会自动立马保存，而需要Mod开发者在更改完成多个数据后，手动调用这个事件来保存数据。<br>以减小保存频率，提高性能。<br>具体注意细节在前面的"**四.框架的使用**"的"3. 关于框架Mod数据保存"有说明。
 > MLDM_SetIMVU | 事件触发 | modUUID(string)<br>isIgnore(boolean) | 既SetIgnoreModVersionUpdates的缩写，用于设置是否忽略Mod版本更新<br>具体参考前面关于SetIgnoreModVersionUpdates的其他API说明
 > GetModDataByDataId | 事件触发 | DataId(string)<br>Key(string/number/nil) | 向框架发出获取指定Mod数据的请求，有两种模式：<br>1. 同时传入DataId和Key，获取指定DataId对应Mod的Key的数据<br>2. 不传入Key，获取整个Mod数据<br>注意LuaEvents无法直接返回数据，所以需要配合另一个LuaEvents[DataId]来获取数据<br>具体情况见注释【1】
 > [DataId]/[DataId_Key] | 事件监听 | Value(any) | 配合上面的GetModDataByDataId来实现跨UIlua脚本的数据传递，获取指定DataId对应Mod的数据，并返回给调用者<br>具体情况见注释【1】
@@ -1322,13 +1322,6 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > LuaEvents.GetModDataByDataId("MyModData", "KEY1")
 > ```
 > </details>
-
-> **注意使用场景**：  
-> 总的来说这个**仅仅推荐在联机中使用**
-> - 在前端环境,因为GameConfiguration涉及游戏配置，当发生创键新的游戏/退回主菜单等等情况时，游戏都会自动清空GameConfiguration的数据，所以，请不要在前端使用GameConfiguration.GetValue来获取你的mod数据。
-> - 而在InGame环境，且是单机的情况，理论上如果框架将数据在游戏开始时，将mod数据存入游戏存档的GameConfiguration，那么其他mod也能获取到，但我认为这是没有必要的操作，因为完全可以通过LuaEvents/ExposedMembers来实现数据的获取。没必要在使用GameConfiguration.GetValue来获取数据，因为直接通过GameConfiguration，会极大增加玩家每个游戏存档的体积
-> - 最后在InGame环境的联机游戏中时，部分mod数据很可能是影响游戏的关键数据，所以，我在框架设计了一种机制来实现数据的同步，是在联机存档开始前在联机房间中统一使用GameConfiguration.SetValue来同步数据，在联机房间中，其他mod也能获取到数据，并且在游戏结束后统一使用GameConfiguration.SetValue来同步数据。
-> - 具体的联机游戏中数据同步机制，请参考后面的联机游戏中注意事项部分。
 
 ### 3. 联机数据的获取API
 - 已经在前面的'四.框架的使用'的'4. 关于网络多人联机数据同步问题'中有说明，这里不再赘述
