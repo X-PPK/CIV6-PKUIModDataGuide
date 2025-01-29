@@ -5,6 +5,11 @@
 ---
 本文档旨在阐述《文明6》中皮凯UI框架mod下的“mod本地数据存储子框架”的使用方法。该框架允许每个mod拥有独立的持久化数据存储，这些数据能够跨游戏对局保存，存储于玩家的本地电脑中。以下提供的详细使用指南旨在帮助那些决定采用此框架的mod开发者们，能够轻松掌握并有效地运用这一工具。
 以下内容中提到的“框架”，均指该子框架部分。
+> 感谢以下人员对本框架的帮助 : (根据拼音首字母/字母排序)
+> - 感谢'[atts.leo](https://steamcommunity.com/profiles/76561199589258333)' 非常有耐心陪伴我测试联机，研究游戏联机相关的API。如果没有他的帮助，我恐怕难以解决框架的数据同步问题。
+> - 感谢'[号码菌Synora](https://steamcommunity.com/profiles/76561198147378701)' 帮我解答了一些技术难题，减少了我研究联机同步时验证官方API的时间，让我能更高效地推进项目进度。
+> - 感谢'[UzukiShimamura卯月](https://steamcommunity.com/profiles/76561198402598762)' 在我实现这个框架过程中提供了许多具有建设性的建议和帮助，让我规避了许多未曾考虑到的问题，大大提高了项目的稳定性。
+> - 感谢'[夏凉凉凉](https://steamcommunity.com/profiles/76561199052584728)' 告知ExposedMembers可以实现前端数据与InGame数据之间的交互，在此之前我只知道它可以实现InGame的Game环境和UI环境的lua交互。得益于他的帮助，我现在可以更加便捷地实现数据从前端传递到InGame，避免了采用更为复杂的方法。
 
 ---
 ## 二. 框架设计概述
@@ -77,10 +82,45 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 > Version | 代表的是mod数据的版本号，而非mod本身的版本。<br>当您的mod需要进行数据更新时，必须更新这个版本号。<br>框架会根据这个版本号来决定是否应该覆盖现有的数据。<br>在默认情况下，框架会继续使用之前存储的数据来填充Lua变量，只有在版本号发生变化时，才会进行数据覆盖。<br>Lua还提供了一套接口，用于在版本更新时根据旧数据执行必要的更新操作。关于如何使用这些接口的详细说明，将在后续章节中提供。
 > </details>
 
+> <details><summary>相关源码（以对DataId进行约束）</summary>
+> 
+> ```sql
+> CREATE TABLE ModDataIds (
+>     ModId TEXT PRIMARY KEY, -- ModId 是主键，也有UNIQUE 约束，不允许重复
+>     DataId TEXT NOT NULL UNIQUE, -- UNIQUE 约束确保 DataId 字段的值在整个表中是唯一的
+>     Version INTEGER NOT NULL DEFAULT 1
+>     -- EditEnvironment INTEGER NOT NULL DEFAULT -1 CHECK (EditEnvironment IN (-1, 0, 1)) -- 弃用，每个mod配置参数在lua设置环境
+> );
+> 
+> -- 创建触发器来限制 DataId 的字符类型
+> CREATE TRIGGER PK_Validate_DataId_Before_Insert
+> BEFORE INSERT ON ModDataIds
+> FOR EACH ROW
+> BEGIN
+>     SELECT
+>         CASE
+>             WHEN NEW.DataId NOT GLOB '[a-zA-Z0-9_]*' THEN
+>                 RAISE(ABORT, 'Invalid DataId for record "' || NEW.ModId || '": "' || NEW.DataId || '". DataId can only contain alphanumeric characters and underscores.')
+>         END;
+> END;
+> 
+> CREATE TRIGGER PK_Validate_DataId_Before_Update
+> BEFORE UPDATE ON ModDataIds
+> FOR EACH ROW
+> BEGIN
+>     SELECT
+>         CASE
+>             WHEN NEW.DataId NOT GLOB '[a-zA-Z0-9_]*' THEN
+>                 RAISE(ABORT, 'Invalid DataId for record "' || NEW.ModId || '": "' || NEW.DataId || '". DataId can only contain alphanumeric characters and underscores.')
+>         END;
+> END;
+>```
+> </details>
+
 ### 2. 框架lua使用前言
 在使用框架进行Lua脚本开发之前，以下是一些重要的前提和指南。  
 - **框架数据使用环境**：框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。
-#### Mod数据表及键值规范**
+#### Mod数据表及键值规范：
 - 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}}, 以下简称该结构为“Mod数据表”。
 - Mod数据表存储于框架的 CurrentlyModDatas 子表中，键值是由 ModUUID 生成唯一的字符串标识 ModKey。
 - 可以通过框架直接访问Mod数据：MLDM.CurrentlyModDatas[modKey]。
@@ -146,6 +186,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 此设计旨在简化数据管理，同时兼顾联机模式下的同步数据快速管理以及单机模式下的数据统一管理。
 > <details><summary>元表源码</summary>
 > 
+> - 我在PK_MetaTableUtility.lua设置两种元表如果有需要可以去include使用
 > - 这也是一个很好的学习lua元表的例子(给lua萌新的建议)
 > - 一种数据管理方案，直接根据键值不同对数据进行分配，同时又能兼顾整体数据（好吧跑题了，哈哈）
 > 
@@ -195,7 +236,284 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
   - **游戏内(InGame)环境**：框架会在保存游戏存档时自动保存所有mod数据，同时也提供了主动保存的API。
 
 由于所有mod数据都存储在一个配置存档中，频繁的保存操作可能会影响性能和游戏体验，因此建议减少不必要的频繁保存。
- 
+
+#### 关于网络多人联机数据同步问题：
+- **数据影响评估**：Mod开发者应评估自己Mod数据使用中，是否会影响游戏联机同步。例如，仅用于玩家个性化自我展示的UI界面的配置数据不会影响同步，而Game环境Lua中不同玩家使用的数据则可能导致同步问题。
+
+- **官方API利用**：对于可能引起同步问题的数据，我们推荐使用官方API `UI.RequestPlayerOperation` 来确保数据的一致性。此API能够处理大多数同步需求。
+  - 实际也可以用于实现UI数据同步，只是需要先同步到Game环境在传到UI环境，但在前端联机房间中时不存在Game环境
+
+- **本框架提供的API同步**：是直接UI环境进行同步，不需要Game环境参与。因此支持在前端联机房间中直接同步数据。
+  - 例如对于需要在前端联机房间UI界面直接展现玩家个性化称号。
+
+在深入探讨本框架的同步机制之前，我们先简要介绍官方联机模式下的数据同步流程，以便mod开发者根据自身需求判断是否采用本框架的同步方案。
+##### 官方的联机
+以下是对官方联机模式下数据同步机制的理解，如有不准确之处，欢迎指正。
+- 要了解概念：游戏配置‘GameConfiguration’，地图配置‘MapConfiguration’，玩家配置‘PlayerConfiguration’，UI.RequestPlayerOperation等等。
+
+**UI环境同步**：
+- **初始配置数据生成**：
+- 若玩家为房主，系统将根据其设置生成相应的配置数据（包括游戏配置和地图配置）。
+- 玩家如果不是房主时，在进入房间时，会自动同步当前房间内的配置数据（包括游戏配置和地图配置,已经房间内当前玩家的玩家配置数据）。
+- **房间内数据同步规则**：
+  - 只有房主有权修改游戏配置数据（包括游戏配置和地图配置），并可将更改同步给其他玩家。（非房主我测试lua更改本地配置成功但无法成功广播，并且这样做后有可能会数据不同步无法正常联机）
+  - 各个人类玩家的玩家配置数据，仅允许该玩家自行修改，并可将修改同步给其他玩家。（本框架同步机制即基于此原理。）
+
+**Game环境同步**：
+- 官方并未提供直接的Game环境同步机制，而是通过UI环境的官方API‘UI.RequestPlayerOperation’调用Game环境函数实现同步。
+- 例如，使用‘UI.RequestPlayerOperation’可实现单个玩家点击按钮调用Game环境函数，并将结果同步给其他玩家。
+- 虽然理论上‘UI.RequestPlayerOperation’可用于数据同步，但存在以下局限性：
+  - Game环境为InGame环境的子环境，无法在前端联机房间阶段使用，仅能在游戏内使用。
+  - Game环境数据传递至UI环境时，存在一定延迟。
+> <details><summary>UI.RequestPlayerOperation和Game数据快速传递UI使用示范</summary>
+>
+> - 关于这个官方接口的使用示范
+>
+> 首先是在UI环境使用，可以调用对应的Game环境，用GameEvents绑定的函数
+> ```lua
+> function UICallMyGameEventsName(playerID)
+>    --先创建一个table，这个表包含调用的Game环境的GameEvents名以及参数
+>    local kParameters:table = {};
+>    kParameters.OnStart = 'MyGameEventsName' -- 这里是GameEvents的名字，需要设定固定key值'OnStart'
+>    -- 参数key和value可以随意设置,我这里演示三个需要传递给Game环境的参数
+>    kParameters.Value1 = 'Hello' -- 这里是你需要传递的参数1
+>    kParameters.Value2 = 'World' -- 这里是你需要传递的参数2
+>    kParameters.Value3 = '!'
+>    -- kParameters.Value4 = 'xxx'
+>    -- 省略...
+>    -- kParameters.ValueN = 'nnnn'
+>    -- 然后使用UI.RequestPlayerOperation来调用GameEvents.MyGameEventsName绑定的函数
+>    -- playerID是玩家id参数, PlayerOperations.EXECUTE_SCRIPT 是文明6lua全局常量
+>    UI.RequestPlayerOperation(playerID, PlayerOperations.EXECUTE_SCRIPT, kParameters)
+>    
+>    -- 在扩展一个简单的Game传递数据给UI的例子
+>    local delayedExecution
+>    delayedExecution = function()
+>      local isSuccess = Players[playerID]:GetProperty('MyGameEventsNameRanSuccessfully')
+>      if isSuccess
+>        if isSuccess == true then
+>          Controls.TextLabel.SetText("Success to call GameEvents.MyGameEventsName")
+>        else
+>          Controls.TextLabel.SetText("Failed to call GameEvents.MyGameEventsName")
+>        end
+>        -- 成功UI环境获得Game环境SetProperty的数据，需要及时Remove，否则delayedExecution还会继续1秒执行60次
+>        Events.GameCoreEventPublishComplete.Remove(delayedExecution)
+>      end
+>    end
+>    -- 实际测试GameCoreEventPublishComplete是一个1秒执行60次的Event，可以用来做计时器
+>    -- 关于文明6lua计时器我有专门的研究总结：
+>      -- https://gitee.com/XPPK/pk-civ6-LuaTimer
+>      -- https://github.com/X-PPK/Civilization-6Lua-Timer
+>      -- 同时我在PKUI框架中还有另一个相关的计时器lua脚本'UITimerManager.lua'比上面更加高级，可以满足更复杂的需求。
+>    -- 实际测试在Game环境SetProperty后，GameCoreEventPublishComplete事件需运行第二次，UI环境GetProperty可以成功获得数据。
+>    -- 也就是从Game环境SetProperty到UI环境GetProperty的延迟时间是小于1/60秒的，这种延迟是不影响玩家体验的
+>    Events.GameCoreEventPublishComplete.Add(delayedExecution)
+>  end
+> ```
+> 对应的Game环境lua代码，需要定义对应的GameEvents和函数
+> ```lua
+> -- 定义函数
+> function MyGameFunction(playerID, kParameters)
+>   PlayerConfigurations[playerID]:SetValue('MyGameEventsNameRanSuccessfully', (kParameters.Value1 == 'Hello' and kParameters.Value2 == 'World' and kParameters.Value3 == '!'))
+> end
+> -- 注册GameEvents,并绑定函数
+> GameEvents.MyGameEventsName.Add(MyGameFunction)
+> ```
+> </details>
+
+##### 框架的同步机制
+本框架在设计初期未充分考虑同步问题，因此相关设计可能不尽完善。
+- **同步数据表**：每个mod数据表均包含一个_snycData子表，用于存储同步数据。框架将自动同步该子表数据至其他玩家游戏。
+- **个性化同步实现**：若mod开发者需实现个性化同步，可不必使用_snycData子表，而是自行编写同步逻辑（框架提供UI环境同步API）。框架仅负责同步_snycData子表数据。
+- **游戏开始前同步**：框架将在游戏开始前（前端联机房间阶段）自动同步_snycData子表数据。
+- **数据获取差异**：
+  - _localData数据：按正常框架方式获取。
+  - _snycData数据：分为前端和InGame环境两种情况：
+    - 在前端，非联机房间时_snycData数据获取方式与_localData相同，联机房间则可以通过玩家ID获取各个人类玩家的_snycData数据。
+    - 在InGame环境，需通过玩家ID获取，我这样设计目的是使得单机和联机mod开发者只需要设置一种获取方式，不需要考虑游戏是单机还是在联机。
+    - 注意：在InGame环境，本地框架的_snycData子表仅包含本地玩家的同步数据，非所有联机玩家的同步数据。
+**如何通过玩家ID获取_snycData子表数据**：
+- 使用场景：在前端环境的联机房间中 /在InGame环境
+- 需通过游戏中玩家ID获取数据，示例代码如下：
+```lua
+local isMultiplayerRoom = MLDM:IsMultiplayerRoom() -- 框架提供的API，判断当前是否是联机房间/联机的游戏中
+local playerModSyncDataStr = PlayerConfigurations[playerId]:GetValue("MLDM_ModSyncData_" .. modDataId)
+local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数来自mod的CIV6_Serialize.lua，如果是ModLocalDataManager_脚本，则可以直接使用，无需在include("CIV6_Serialize")
+```
+> <details><summary>部分相关源码</summary>
+>
+> ```lua  GetLocalPlayerID = function(self)
+>   local iLocalPlayerID:number = -1;
+>   if Network.IsInGameStartedState() then
+>     iLocalPlayerID = Game.GetLocalPlayer();
+>   else
+>     iLocalPlayerID = Network.GetLocalPlayerID();
+>   end
+>   return iLocalPlayerID;
+> end,
+> IsMultiplayerRoom = function(self)
+>   if (UI.IsInFrontEnd()) then
+>     return self.MultiplayerPlayerRecord and true or false
+>   else
+>     return GameConfiguration.IsNetworkMultiplayer()
+>   end
+> end,
+> -- 同步指定Mod数据到其他玩家
+> SyncModDataToOtherPlayers = function(self, dataId, modSyncUpdateData:table)
+>   local localPlayerID = self:GetLocalPlayerID()
+>   if localPlayerID == -1 then return end
+>   if type(dataId) == 'table' then -- 此时更新多个mod的同步数据
+>     if table.count(dataId) == 0 then return end -- 无实际的更新数据，不进行同步
+>     if not modSyncUpdateData then
+>       modSyncUpdateData = {}
+>       for i, idataId in pairs(dataId) do
+>         modSyncUpdateData[i] = self.CurrentlyModDatas[self.ModDataIds[idataId]]._syncData
+>       end
+>     end
+>     dataId = serialize(dataId)
+>   elseif type(dataId) == 'string' then -- 此时更新一个mod的同步数据
+>     modSyncUpdateData = modSyncUpdateData or self.CurrentlyModDatas[self.ModDataIds[dataId]]._syncData
+>   else
+>     print("MLDM:SyncModDataToOtherPlayers dataId参数类型错误")
+>     return
+>   end
+>   local PlayerConfig = PlayerConfigurations[localPlayerID]
+>   local serializedModSyncUpdateDataStr = serialize(modSyncUpdateData)
+>   -- 采用打包方式统一管理，一起同步
+>   PlayerConfig:SetValue("MLDM_ModSyncDataUpdateId", dataId)
+>   PlayerConfig:SetValue("MLDM_ModSyncDataUpdate", serializedModSyncUpdateDataStr)
+>   print('成功同步数据SyncModDataToOtherPlayers')
+>   -- 通知其他玩家同步数据
+>   Network.BroadcastPlayerInfo(localPlayerID)
+>   -- 修复bug
+>   -- 同时本地玩家也需要更新同步数据，因为MLDM_ModSyncDataUpdateId，和MLDM_ModSyncDataUpdate是打包的
+>   -- 否则modder还需要额外区分玩家是否是本地玩家采用不同的获取snycData的方式
+>   -- 因此本地玩家也应当解包MLDM_ModSyncDataUpdateId，和MLDM_ModSyncDataUpdate的数据
+>   -- 这种设计也是为了兼顾不同的同步情况，例如一个mod又更改了个别数据，那么只用同步这部分数据，通过MLDM_ModSyncDataUpdate缓存过度，数据传到其他端，其他端根据这个更改
+>   self:ReceiveModDataSyncFromOtherPlayers(localPlayerID)
+> end,
+> -- 接收其他玩家的Mod数据同步请求
+> ReceiveModDataSyncFromOtherPlayers = function(self, playerId:number)
+>   local PlayerConfig = PlayerConfigurations[playerId]
+>   local modSyncDataUpdateId = PlayerConfig:GetValue("MLDM_ModSyncDataUpdateId")
+>   if modSyncDataUpdateId then
+>     local updateSingleMod = self.ModDataIds[modSyncDataUpdateId]
+>     local needUpdateDatas = deserialize(PlayerConfig:GetValue("MLDM_ModSyncDataUpdate"))
+>     needUpdateDatas = updateSingleMod and {needUpdateDatas} or needUpdateDatas
+>     local DataIds = updateSingleMod and {modSyncDataUpdateId} or deserialize(modSyncDataUpdateId)
+>     
+>     for i, dataId in ipairs(DataIds) do
+>       local oldModSyncDataStr = PlayerConfig:GetValue("MLDM_ModSyncData_" .. dataId)
+>       local newModSyncData = oldModSyncDataStr and deserialize(oldModSyncDataStr) or {}
+>       local modUpdateData = needUpdateDatas[i]
+>       
+>       -- 根据传送过来mod数据更新表，一个一个键值更改对应数据，而不是直接替换整个表，以减小网络传输量
+>       -- 例如一个mod的当前同步数据是{a=1,b=2,c=3}，新的mod的同步数据是{a=4,b=2,c=3}，那么只需要更新a=4，那么只需要发送{a=4}，而不用发整个表
+>       for k, v in pairs(modUpdateData) do
+>         newModSyncData[k] = v
+>       end
+>       -- 每个mod单独一个存储ID
+>       PlayerConfig:SetValue("MLDM_ModSyncData_" .. dataId, serialize(newModSyncData))
+>       LuaEvents['MLDM_ModSyncDataSync_' ..dataId](playerId,newModSyncData) -- 通知对应mod的同步数据发生更新事件
+>     end
+>     -- 已经完成更新，及时清除
+>     PlayerConfig:SetValue("MLDM_ModSyncDataUpdateId", nil)
+>     PlayerConfig:SetValue("MLDM_ModSyncDataUpdate", nil)
+>   end
+> end,
+> -- 清除玩家的同步数据
+> ClearSyncDataByPlayeId = function(self, PlayeId)
+>   -- 数据是玩家独有的，玩家离开房间自动清除
+>   -- 当玩家在联机房间内离开或者被踢需要清除玩家的同步数据
+>   local PlayerConfig = PlayerConfigurations[PlayeId]
+>   for dataId, modkey in pairs(self.ModDataIds) do
+>     local moduuid = self.ModHash[modkey]
+>     if Modding.IsModEnabled(moduuid) then
+>       if table.count(self.CurrentlyModDatas[modkey]._syncData) > 0 then
+>         PlayerConfig:SetValue("MLDM_ModSyncData_" .. dataId, nil) -- 清除玩家的同步数据
+>         LuaEvents['MLDM_ModSyncDataClear_' ..dataId](PlayeId,{}) -- 通知对应mod的同步数据发生清除，请给予默认数据/或其他操作
+>       end
+>     end
+>   end
+> end,
+> init = function(self)
+>   -- 省略其他代码...
+>   -- 当处于联机游戏时(包括前端联机房间到处于联机游戏的Ingame环境)，需要监听玩家信息变化，避免错过数据同步请求
+>   if (UI.IsInFrontEnd()) then
+>     -- 监听玩家信息变化，如果玩家信息变化，则同步对应玩家数据
+>     local function OnPlayerInfoChanged(PlayerID)
+>       local islocalPlayer = PlayerID == self:GetLocalPlayerID()
+>       local PlayerConfig = PlayerConfigurations[PlayerID];
+>       
+>       local old = self.MultiplayerPlayerRecord[PlayerID]
+>       local oldIsHuman = old and old.isHuman
+>       local newIsHuman = PlayerConfig:GetSlotStatus() == SlotStatus.SS_TAKEN
+>       local new = {isHuman = newIsHuman}
+>       if newIsHuman then
+>         local newNetworkId = PlayerConfig:GetNetworkIdentifer()
+>         local newNickName = PlayerConfig:GetNickName()
+>         new.networkId = newNetworkId
+>         new.nickName = newNickName
+>         local isNewPlayerJoining = not old -- 此时在MultiplayerPlayerRecord未被记录，应当是刚加入/创键房间的玩家ID
+>         local isAIChangedToHuman = not oldIsHuman -- AI玩家槽位被人类玩家占用/切换
+>         local isDiffHumanPlayer  = oldIsHuman and ( old.networkId ~= newNetworkId or old.nickName ~= newNickName) -- 人类玩家之间发生切换位置 (检测人类玩家ID和昵称是否发生变化)
+>         -- 此时新的人类玩家加入/AI玩家变人类/人类玩家之间位置切换，如果是我们自己，需要广播我们的Mod数据，以便其他人同步我们的数据
+>         if islocalPlayer then
+>         -- 同步自己的数据，以保证同步
+>         if isNewPlayerJoining or isAIChangedToHuman or isDiffHumanPlayer then SyncMyModData(self.CurrentlyModDatas) end
+>         else
+>         -- 检测是不是其他玩家的同步mod数据请求，如果是，则同步对应玩家数据
+>         self:ReceiveModDataSyncFromOtherPlayers(PlayerID)
+>         end
+>         LuaEvents.MLDM_MultiplayerRoomHumanPlayerPositionChange(PlayerID) -- 玩家位置变化事件
+>       else
+>         -- 此时发生人类玩家变AI，需要清除对应ID数据,可能是该玩家离开游戏/被踢，亦或者玩家和AI位置切换，AI被换到人类玩家之前的位置
+>         if oldIsHuman then
+>         self:ClearSyncDataByPlayeId(PlayerID)
+>         LuaEvents.MLDM_MultiplayerRoomHumanPlayerPositionChange(PlayerID) -- 玩家位置变化事件
+>         end
+>       end
+>       self.MultiplayerPlayerRecord[PlayerID] = new
+>     end
+>     -- 前端联机房间中当玩家信息变化需要及时检测是否是数据同步请求
+>     Events.MultiplayerJoinRoomComplete.Add(function()
+>       --print("MLDM:MultiplayerJoinRoomComplete联机房间创建/加入完成", GameConfiguration.IsNetworkMultiplayer())
+>       if GameConfiguration.IsNetworkMultiplayer() then
+>         self.MultiplayerPlayerRecord = {}
+>         print("开始监听玩家信息变化,以进行数据同步")
+>         Events.PlayerInfoChanged.Add(OnPlayerInfoChanged)
+>       end
+>     end)
+>     LuaEvents.Multiplayer_ExitShell.Add(function()
+>       if self.MultiplayerPlayerRecord then
+>         --print('退出联机房间，停止监听玩家信息变化')
+>         self.MultiplayerPlayerRecord = nil -- 及时清除记录,也意味着不处于联机房间
+>         Events.PlayerInfoChanged.Remove(OnPlayerInfoChanged)
+>       end
+>     end)
+>   else
+>     -- 游戏对局中如果人类玩家离场不清除数据，以便后续人类玩家重新联线。
+>     -- 只需要正常处理有可能的同步请求即可
+>     local function OnPlayerInfoChanged(PlayerID)
+>       if PlayerID ~= self:GetLocalPlayerID() then self:ReceiveModDataSyncFromOtherPlayers(PlayerID) end
+>     end
+>     -- Events.LoadComplete
+>     Events.LoadGameViewStateDone.Add(function(eResult, eType, eOptions, eFileType)
+>       --if eFileType ~= SaveFileTypes.GAME_STATE then return end
+>       if GameConfiguration.IsNetworkMultiplayer() then
+>         Events.PlayerInfoChanged.Add(OnPlayerInfoChanged)
+>         -- 联机模式已经在前端联机房间中处理SyncMyModData，这里不再处理
+>       else
+>         -- 正常将同步数据存入玩家,和联机保持一样，这样直接按联机模式中数据的获取方式来使用这部分数据
+>         -- 目的是避免还需要要额外构造代码来区分单机模式和联机模式采取不同的数据获取，从而减小mod开发者的工作量
+>         SyncMyModData(self.CurrentlyModDatas)
+>       end
+>     end)
+>   end
+> end,
+> ```
+> </details>
+
 #### 如何在Lua脚本中使用框架数据：
 有多种方式可以在Lua脚本中使用框架数据，以下是一些关键参数的说明：
   - modUUID：mod的唯一标识，既你的Mod的modinfo文件中的ModId
@@ -285,7 +603,6 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 
 接下来，我会依次介绍这些API的使用方法。
 
-
 ##### a. GetKey
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 用于获得mod数据在框架内存储使用的key，这个ModKey是框架内部用来存储数据的唯一标识，可以用来操作数据
@@ -365,42 +682,197 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```Lua
 >   -- 注意： saveID是框架内部使用的，请Mod开发者注意不要使用它，保持saveID=nil即可
 >   SaveConfig = function(self, saveID:string)
+>     -- 有待测试保存需要消耗的时间或许后续可以改进，避免多个mod同时调用时，重复保存最新的数据，应当利用计时器，对多余的保存请求进行合并
+>     
+>     print("ModLocalDataManager SaveModData")
 >     local function Save()
 >       local gameFile = {
->        Name = saveID or self.ConfigFileName,
+>         Name = saveID or self.ConfigFileName,
 >         Type = SaveTypes.SINGLE_PLAYER,
 >         FileType = SaveFileTypes.GAME_CONFIGURATION,
 >       };
->       local EMMDC = ExposedMembers.ModDataCache
->       local Traversed = table.count(EMMDC) > 0 and EMMDC or self.CurrentlyModDatas
->       for k, v in pairs(Traversed) do
->          GameConfiguration.SetValue(k, serializeAndSplitToStringTable({_localData = v._localData, _syncData = v._syncData}))
->       end
 >       if not saveID then
->         Events.SaveComplete.Add(function(eResult, eType, eOptions, eFileType )
->           if eFileType == SaveFileTypes.GAME_CONFIGURATION then
->             for k, _ in pairs(Traversed) do
->               GameConfiguration.SetValue(k, nil) -- 已保存到本地, 及时清除这里数据
+>         --GameConfiguration.SetValue(saveID or self.ConfigFilxeName, self.CurrentlyModDatas) -- 存入当前配置
+>         local tempKeys = {}
+>         for k, v in pairs(self.CurrentlyModDatas) do
+>           -- 存储策略上，我更偏向于保守，因为我不知道文明6的具体存储机制
+>           -- 虽然GameConfiguration.SetValue这里支持直接存储表，但在存储中很可能会有问题：字符串的键值变为哈希值，导致无法获得原有的字符串键值的表
+>           -- 目前猜测可能和文明6的表存储的序列化有关，不清楚文明6存储表采用那种序列化存储/读取时采用那种反序列化方式
+>           -- 总之我在完成框架中，初始版本是正常可以获取对应表，但在后续开发中遇到这个问题，导致字符串键值丢失，无法正常读取之前存储的数据
+>           -- 现在的解决方案是，这里将表序列化后转为字符串，然后在读取时反序列化，以确保获得原表
+>           -- 之所以不直接存储一个长字符串是我担心官方这个存储接口在存储字符串时，对字符串有长度限制
+> 
+>           -- 发现直接存储字符串不会被压缩可以直接在存档文件中明码显示出来
+>           -- 也就是存档没有对字符串有压缩，那么这里增加压缩
+>           -- 如果一个mod数据过大拆分存储，避免数据过大导致存储失败(压缩后的字符串每3000个字符就在GameConfiguration存储一次)
+>           local compressedTab = PKSerializeAndCompressTab({_localData = v._localData, _syncData = v._syncData}, 1, 3000)
+>           local strNum = #compressedTab
+>           if strNum > 1 then
+>             GameConfiguration.SetValue(k, strNum)
+>             tempKeys[k] = strNum
+>             for i, compressedStr in ipairs(compressedTab) do
+>               GameConfiguration.SetValue(k .. "_" .. i, compressedStr)
 >             end
+>           else
+>             GameConfiguration.SetValue(k, compressedTab) --每个mod单独一个配置ID存储
 >           end
->         end, 1)
+>         end
+>         self:DataCache() -- 更新缓存数据
+>         if (UI.IsInGame()) then
+>           Events.SaveComplete.Add(function(eResult, eType, eOptions, eFileType )
+>             if eFileType == SaveFileTypes.GAME_CONFIGURATION then
+>               -- 已保存到本地, 及时当前游戏中这些数据
+>               for k, _ in pairs(self.CurrentlyModDatas) do
+>                  GameConfiguration.SetValue(k, nil)
+>                  if tempKeys[k] then
+>                    for i = 1, tempKeys[k] do
+>                      GameConfiguration.SetValue(k .. "_" .. i, nil)
+>                    end
+>                  end
+>               end
+>             end
+>           end, 1)
+>         end
 >       end
->       UIManager:SetUICursor( 1 );
+>       UIManager:SetUICursor( 1 ); -- 我忘记这个是干什么的了，算了保留，不影响运行
 >       Network.SaveGame(gameFile);
 >       UIManager:SetUICursor( 0 );
 >     end
+>     Save()
+>   end,
+> ```
+> </details>
+
+##### d. IsMultiplayerRoom
+- 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
+- 用于判断当前是否是联机房间/联机的游戏中
+- 返回值：boolean，true表示当前是联机房间/联机的游戏中，false表示当前是不是联机房间/单机游戏
+> 操作演示：
+> ```Lua
+> -- 如果是在前端这是判断是否是联机房间，如果是在游戏中则判断是否是联机游戏
+> ；local isMultiplayerRoom = MLDM:IsMultiplayerRoom()
+> ```
+
+> <details><summary>相关源码</summary>
+> 
+> ```Lua
+>   IsMultiplayerRoom = function(self)
 >     if (UI.IsInFrontEnd()) then
->       Save()
+>       return self.MultiplayerPlayerRecord and true or false
 >     else
->       self:OpenMenu(4) -- 实际测试前端保存可以直接不打开对应的保存页面, 可以直接使用Network.SaveGame, 同时如果Name相同会自动覆盖同名的保存文件
->       Save()
->       self:CloseMenu(4)
+>       return GameConfiguration.IsNetworkMultiplayer()
 >     end
 >   end,
 > ```
 > </details>
 
-##### d. GetModObject
+##### e. GetLocalPlayerID
+- 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
+- 用于获得当前本地玩家的ID
+- 返回值：number，当前本地玩家的ID
+> 操作演示：
+> ```Lua
+> -- 如果是在前端的联机房间中，这里是玩家当前槽位的ID（注意在联机房间玩家可以切换玩家槽位会更换ID），如果是在游戏中则是当前本机的玩家的ID
+> ；local localPlayerID = MLDM:GetLocalPlayerID()
+> ```
+
+> <details><summary>相关源码</summary>
+> 
+> ```Lua
+>   GetLocalPlayerID = function(self)
+>     local iLocalPlayerID:number = -1;
+>     if Network.IsInGameStartedState() then
+>       iLocalPlayerID = Game.GetLocalPlayer();
+>     else
+>       iLocalPlayerID = Network.GetLocalPlayerID();
+>     end
+>     return iLocalPlayerID;
+>   end,
+> ```
+> </details>
+
+##### f. SyncModDataToOtherPlayers
+- 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
+- 用于同步指定Mod数据到其他玩家
+- 参数1：dataId：string/table，同步数据的ID，可以是字符串，也可以是table。如果是字符串，则同步一个modDataID对应mod的数据；如果是table，需要为数组表，数组中包含多个modDataID，同步多个对应mod的数据。
+- 参数2：modSyncUpdateData：table，是需要更新的数据，如果不提供，则使用当前mod数据中的_syncData同步数据，会更新整个mod的_syncData。
+  - 如果只需要更新部分参数，那么这里务必要提供该参数，需要包含要更改的键值对即可，不更改的键值对表中无需添加。
+  - 例如只更新 modDataId='myModDataId'对应mod的_syncData.myParam1，则提供的参数为 MLDM:SyncModDataToOtherPlayers('myModDataId', { myParam1 = newValue })
+
+> <details><summary>操作演示：</summary>
+> 
+> ```Lua
+> -- 假设'myModDataId'对应mod的_syncData = { _myParam1 = 10, _myParam2 = 'hello' }
+> local function GetlocalPlayerModSyncData()
+>   local localPlayerID = MLDM:GetLocalPlayerID()
+>   local localPlayerConfig = PlayerConfigurations[localPlayerID]
+>   local playerModSyncDataStr = localPlayerConfig:GetValue("MLDM_ModSyncData_myModDataId")
+>   local localPlayerModSyncData = deserialize(playerModSyncDataStr)
+>   return localPlayerModSyncData
+> end
+> -- 同步指定Mod的_syncData数据到其他玩家
+> MLDM:SyncModDataToOtherPlayers('myModDataId') -- 相相当于 MLDM:SyncModDataToOtherPlayers('myModDataId', { _myParam1 = 10, _myParam2 = 'hello' })
+> -- 数据同步后
+> local localPlayerModSyncData1 = GetlocalPlayerModSyncData() -- { _myParam1 = 10, _myParam2 = 'hello' }
+>
+>
+> -- 假如要更新覆盖同步指定Mod的_syncData.myParam1数据到其他玩家
+> MLDM:SyncModDataToOtherPlayers('myModDataId', { myParam1 = 20 })
+> -- 数据同步后
+> local localPlayerModSyncData2 = GetlocalPlayerModSyncData() -- { _myParam1 = 20, _myParam2 = 'hello' }
+>
+>
+> -- 当然也支持mod开发者同步自定义的同步数据
+> MLDM:SyncModDataToOtherPlayers('myModDataId', { CustomizeSynchronizedDataKEY1 = {1,2,3} })
+> -- 数据同步后
+> local localPlayerModSyncData3 = GetlocalPlayerModSyncData() -- { _myParam1 = 20, _myParam2 = 'hello', CustomizeSynchronizedDataKEY1 = {1,2,3} }
+> 
+> -- 同步多个Mod的_syncData数据到其他玩家，例如：
+> MLDM:SyncModDataToOtherPlayers({ 'Mod1DataId', 'Mod2DataId', 'Mod3DataId' })
+> MLDM:SyncModDataToOtherPlayers({ 'Mod1DataId', 'Mod2DataId', 'Mod3DataId' }, { {_mod1key=1},{mod2key=2},{mod3key=3} })
+> ```
+> </details>
+
+> <details><summary>相关源码</summary>
+> 
+> ```Lua
+> SyncModDataToOtherPlayers = function(self, dataId, modSyncUpdateData:table)
+>   local localPlayerID = self:GetLocalPlayerID()
+>   if localPlayerID == -1 then return end
+>   if type(dataId) == 'table' then -- 此时更新多个mod的同步数据
+>     if table.count(dataId) == 0 then return end -- 无实际的更新数据，不进行同步
+>     if not modSyncUpdateData then
+>     modSyncUpdateData = {}
+>     for i, idataId in pairs(dataId) do
+>       modSyncUpdateData[i] = self.CurrentlyModDatas[self.ModDataIds[idataId]]._syncData
+>     end
+>     end
+>     dataId = serialize(dataId)
+>   elseif type(dataId) == 'string' then -- 此时更新一个mod的同步数据
+>     modSyncUpdateData = modSyncUpdateData or self.CurrentlyModDatas[self.ModDataIds[dataId]]._syncData
+>   else
+>     print("MLDM:SyncModDataToOtherPlayers dataId参数类型错误")
+>     return
+>   end
+>   local PlayerConfig = PlayerConfigurations[localPlayerID]
+>   local serializedModSyncUpdateDataStr = serialize(modSyncUpdateData)
+>   -- 采用打包方式统一管理，一起同步
+>   PlayerConfig:SetValue("MLDM_ModSyncDataUpdateId", dataId)
+>   PlayerConfig:SetValue("MLDM_ModSyncDataUpdate", serializedModSyncUpdateDataStr)
+>   print('成功同步数据SyncModDataToOtherPlayers')
+>   -- 通知其他玩家同步数据
+>   Network.BroadcastPlayerInfo(localPlayerID)
+>   -- 修复bug
+>   -- 同时本地玩家也需要更新同步数据，因为MLDM_ModSyncDataUpdateId，和MLDM_ModSyncDataUpdate是打包的
+>   -- 否则modder还需要额外区分玩家是否是本地玩家采用不同的获取snycData的方式
+>   -- 因此本地玩家也应当解包MLDM_ModSyncDataUpdateId，和MLDM_ModSyncDataUpdate的数据
+>   -- 这种设计也是为了兼顾不同的同步情况，例如一个mod又更改了个别数据，那么只用同步这部分数据，通过MLDM_ModSyncDataUpdate缓存过度，数据传到其他端，其他端根据这个更改
+>   self:ReceiveModDataSyncFromOtherPlayers(localPlayerID)
+> end,
+> ```
+> </details>
+
+##### g. GetModObject
 - 对象是MLDM，需要一个隐式的 “self” 参数，所以请使用:
 - 他会返回一个"类"对象(setmetatable定义的Lua表)，是为了更方便大家管理自己mod数据而设计。  
 你可以使用这个对象来添加/定制属于你的Mod配置UI，或者进行非配置数据的操作。  
@@ -418,7 +890,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 
 > <details><summary>相关源码</summary>
 > 
-> - 都是直接在表 methods 定义的函数，所以不需要隐式的self参数，所以请使用.
+> - 都是直接在methods表直接定义的子函数，所以不需要隐式的self参数，所以请使用.
 > 
 > ```Lua
 >   GetModObject = function(self, modID:string)
@@ -459,8 +931,8 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 >         if type(iKey) ~= "string" and type(iKey) ~= "number" then
 >           print("The first argument must be a string or number key.")
 >         end
->         -- 禁止使用_localData 和 _syncData 为key
->         if key == '_localData' or key == '_syncData' then
+>         -- 禁止使用_localData 和 _syncData 为key,除非是替换整个_localData或_syncData的数据
+>         if key == '_localData' or key == '_syncData' or type(value) ~= 'table' then
 >           print("Can't set param for _localData or _syncData.", iKey, value)
 >           return
 >         end
@@ -469,7 +941,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 >       SetParams = function(t:table)
 >         -- 批量设置参数模式：当 value1 是一个表时
 >         for k, v in pairs(t) do
->           if k == '_localData' or k == '_syncData' then
+>           if k == '_localData' or k == '_syncData' or type(value) ~= 'table' then
 >             print("Can't set params for _localData or _syncData.", k, v)
 >           else
 >             self.CurrentlyModDatas[key][k] = v
@@ -539,7 +1011,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
 
-> <details><summary>相关API</summary>
+> <details><summary>“ModObject”相关API</summary>
 >
 > 这里也有 SetIgnoreModVersionUpdates
 > 但和上面不同，这里是直接ModData设定该mod数据是否"忽略版本更新"，而上面还需要提供modUUID参数
@@ -621,7 +1093,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
  
-> <details><summary>相关API演示</summary>
+> <details><summary>“ModObject”相关API演示</summary>
 > 
 > ###### **基础API**
 > ```Lua
@@ -733,8 +1205,10 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 
 
 #### 3.2 跨UIlua脚本API
-- 如果熟悉文明6的lua，我想说到跨UI-lua脚本的交互应该立马想到LuaEvents和ExposedMembes。  
-是的我们需要使用他们来完成跨UI-lua脚本的交互，同时还有一个独特的官方API也会被使用，请让我一点一点讲述
+如果熟悉文明6的lua，我想说到跨UI-lua脚本的交互应该立马想到LuaEvents和ExposedMembes。  
+是的我们需要使用他们来完成跨UI-lua脚本的交互，同时还有一个独特的官方API也会被使用，请让我一点一点讲述  
+这里我们没有使用ExposedMembes，而是使用了LuaEvents。  
+因为ExposedMembes，更适合单机本地游戏，不适用于联机游戏。因为你无法获取联机游戏中对方的ExposedMembers。  
 
 ##### a. LuaEvents
 - **注意**: 是在UI环境定义的的LuaEvents，你在Game环境无法使用这里的LuaEvents
@@ -804,19 +1278,25 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > </details>
 
 > <details><summary>相关API</summary>
->
-> 方法 | 参数 | 说明
-> --- | --- | --- 
-> MLDM_ConfigUIStart | - | 通知其他mod脚本配置UI开始刷新，每次打开配置UI时，都会调用这个事件
-> MLDM_ConfigUIComplete | - | 通知其他mod脚本配置UI刷新完成，每次打开配置UI时，都会根据配置数据刷新UI，在刷新完成后，会调用这个事件
-> MLDM_AlmostComplete | - | 通知其他mod脚本，框架几乎初始化完成，但加载Mod数据的屏幕还未关闭，可以正常获得各自Mod的数据了
-> MLDM_InitComplete | - | 通知其他mod脚本，框架初始化完成，可以正常获得各自Mod的数据了
-> MLDM_Saving | - | 用于让框架对当前数据进行保存。<br>因为数据的存储是保存在配置存档中的，为了避免频繁的保存，所以每次发生数据修改不会自动立马保存，而需要Mod开发者在更改完成多个数据后，手动调用这个事件来保存数据。<br>以减小保存频率，提高性能。<br>具体注意细节在前面的"**2. 框架lua使用前言**"有说明。
-> MLDM_SetIMVU | modUUID(string)<br>isIgnore(boolean) | 既SetIgnoreModVersionUpdates的缩写，用于设置是否忽略Mod版本更新<br>具体参考前面关于SetIgnoreModVersionUpdates的其他API说明
-> GetModDataByDataId | DataId(string)<br>Key(string/number/nil) | 向框架发出获取指定Mod数据的请求，有两种模式：<br>1. 同时传入DataId和Key，获取指定DataId对应Mod的Key的数据<br>2. 不传入Key，获取整个Mod数据<br>注意LuaEvents无法直接返回数据，所以需要配合另一个LuaEvents[DataId]来获取数据<br>具体情况见注释【1】
-> [DataId]/[DataId_Key] | Value(any) | 配合上面的GetModDataByDataId来实现跨UIlua脚本的数据传递，获取指定DataId对应Mod的数据，并返回给调用者<br>具体情况见注释【1】
-> SetModDataByModId | modUUID(string)<br>Value1(string/number/table)<br>Value2(any) | 设置指定Mod数据，有两种模式：<br>1. Value1作为key(string/number)，同时传入modUUID、Key和Value2，设置指定Mod的Key的数据为Value2<br>2. Value1类型是表(table)，传入modUUID和Value1，会遍历Value1的key-value对，设置指定Mod的key的数据为value<br>最后完成所有数据更改，如果需要立即保存数据别忘记调用保存的API
->
+> 
+> - 两种使用方法，一中是mod开发者主动触发调用的LuaEvents(下面我称为'事件触发')，另一种是框架触发调用的LuaEvents，mod开发者绑定需要被调用的函数(下面我称为'事件监听')
+> - LuaEvents无法直接返回数据，所以这里参数是有调用触发放给监听方的，别搞混
+> 
+> 方法 | 使用方法 | 参数 | 说明
+> --- | --- | --- | --- 
+> MLDM_ConfigUIStart | 事件监听 | - | 通知其他mod脚本配置UI开始刷新，每次打开配置UI时，都会调用这个事件
+> MLDM_ConfigUIComplete | 事件监听 | - | 通知其他mod脚本配置UI刷新完成，每次打开配置UI时，都会根据配置数据刷新UI，在刷新完成后，会调用这个事件
+> MLDM_AlmostComplete | 事件监听 | - | 通知其他mod脚本，框架几乎初始化完成，但加载Mod数据的屏幕还未关闭，可以正常获得各自Mod的数据了<br> 只在前端环境有触发
+> MLDM_InitComplete | 事件监听 | - | 通知其他mod脚本，框架初始化完成，可以正常获得各自Mod的数据了
+> MLDM_Saving | 事件触发 | - | 用于让框架对当前数据进行保存。<br>因为数据的存储是保存在配置存档中的，为了避免频繁的保存，所以每次发生数据修改不会自动立马保存，而需要Mod开发者在更改完成多个数据后，手动调用这个事件来保存数据。<br>以减小保存频率，提高性能。<br>具体注意细节在前面的"**2. 框架lua使用前言**"有说明。
+> MLDM_SetIMVU | 事件触发 | modUUID(string)<br>isIgnore(boolean) | 既SetIgnoreModVersionUpdates的缩写，用于设置是否忽略Mod版本更新<br>具体参考前面关于SetIgnoreModVersionUpdates的其他API说明
+> GetModDataByDataId | 事件触发 | DataId(string)<br>Key(string/number/nil) | 向框架发出获取指定Mod数据的请求，有两种模式：<br>1. 同时传入DataId和Key，获取指定DataId对应Mod的Key的数据<br>2. 不传入Key，获取整个Mod数据<br>注意LuaEvents无法直接返回数据，所以需要配合另一个LuaEvents[DataId]来获取数据<br>具体情况见注释【1】
+> [DataId]/[DataId_Key] | 事件监听 | Value(any) | 配合上面的GetModDataByDataId来实现跨UIlua脚本的数据传递，获取指定DataId对应Mod的数据，并返回给调用者<br>具体情况见注释【1】
+> SetModDataByModId | 事件触发 | modUUID(string)<br>Value1(string/number/table)<br>Value2(any) | 设置指定Mod数据，有两种模式：<br>1. Value1作为key(string/number)，同时传入modUUID、Key和Value2，设置指定Mod的Key的数据为Value2<br>2. Value1类型是表(table)，传入modUUID和Value1，会遍历Value1的key-value对，设置指定Mod的key的数据为value<br>最后完成所有数据更改，如果需要立即保存数据别忘记调用保存的API
+> MLDM_MultiplayerRoomHumanPlayerPositionChange | 事件监听 | playerId(number) | 通知其他mod脚本，在游戏前端的多人联机房间中，某个玩家的位置发生变化
+> ['MLDM_ModSyncDataSync_' ..dataId] | 事件监听 | playerId(number)<br>ModSyncData(table) | 通知ModDataId对应的mod脚本，在游戏前端的多玩家联机房间中，特定人类玩家ID的该mod的同步数据已完成同步。<br> modder需要在自己的脚本中定义自己的处理同步数据的函数，，并在自己的脚本中绑定监听事件，例如设置该ID对应的数据。
+> ['MLDM_ModSyncDataClear_' ..dataId] | 事件监听 | playerId(number) | 通知ModDataId对应的mod脚本，在游戏前端的多玩家联机房间中，特定人类玩家ID的该mod的同步数据已清除。<br> modder需要在自己的脚本中定义自己的处理同步数据的函数，并在自己的脚本中绑定监听事件，例如将该ID对应的数据恢复默认/置空等操作。
+> 
 > 注释【1】：演示如何通过DataId获取对应的Mod数据  
 > 假设有一个mod的DataId为"MyModID"，modder需要定义了自己的处理数据的方法，在自己的脚本中可以这样定义自己的处理数据的
 > ```Lua
@@ -840,115 +1320,14 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
 
-##### b. ExposedMembers
-> - 这里首先我想讲述一下我理解的ExposedMembers:  
-首先字面意思是"公开的成员"  
-而再实际的lua应用中，所有的lua环境都能访问使用它，包括前端环境，InGame环境，以及InGame的Game环境和UI环境。  
-因此我们认为ExposedMembers是一种游戏内所有LUA环境都能访问使用的全局的变量，是一个表。是一个非常好的跨LUA环境的交互方式。
-
-> - 因此ExposedMembers可以存储包括字符串，数字，表，函数等各种类型的数据，并且可以被所有LUA环境访问。  
-但他也有缺陷，更适合单机本地游戏，不适用于联机游戏。因为你无法获取联机游戏中对方的ExposedMembers数据。  
-导致容易造成数据不同步，使得联机断开。  
-为此我后续会单独讲解框架在联机游戏中的注意项。  
-
-> - 这里也要感谢'夏凉凉凉'告知ExposedMembers可以实现前端数据与InGame数据之间的交互，在此之前我只知道他可以实现InGame的Game环境和UI环境的lua交互。
-
-> - 那么接下来我将详细介绍框架中ExposedMembers的使用方法。
-
-当框架数据加载完成(既触发LuaEvents.MLDM_InitComplete)后，会将数据给与到ExposedMembers.ModDataCache中
-你可以通过ExposedMembers.ModDataCache[Modkey]来获取自己mod数据。
-
-##### c. GameConfiguration.GetValue
-GameConfiguration是游戏官方的API，框架的核心就是加载/保存配置存档，再通过GameConfiguration.SetValue和GameConfiguration.GetValue来实现数据的存储和读取。
-- 是的这个接口你也可以用于UI环境自己存储数据，但注意你使用的存储键值一定要保证唯一性，特别是不要覆盖到游戏本身用到的键值。以免导致游戏不正常
-
 > **注意使用场景**：  
 > 总的来说这个**仅仅推荐在联机中使用**
 > - 在前端环境,因为GameConfiguration涉及游戏配置，当发生创键新的游戏/退回主菜单等等情况时，游戏都会自动清空GameConfiguration的数据，所以，请不要在前端使用GameConfiguration.GetValue来获取你的mod数据。
 > - 而在InGame环境，且是单机的情况，理论上如果框架将数据在游戏开始时，将mod数据存入游戏存档的GameConfiguration，那么其他mod也能获取到，但我认为这是没有必要的操作，因为完全可以通过LuaEvents/ExposedMembers来实现数据的获取。没必要在使用GameConfiguration.GetValue来获取数据，因为直接通过GameConfiguration，会极大增加玩家每个游戏存档的体积
 > - 最后在InGame环境的联机游戏中时，部分mod数据很可能是影响游戏的关键数据，所以，我在框架设计了一种机制来实现数据的同步，是在联机存档开始前在联机房间中统一使用GameConfiguration.SetValue来同步数据，在联机房间中，其他mod也能获取到数据，并且在游戏结束后统一使用GameConfiguration.SetValue来同步数据。
 > - 具体的联机游戏中数据同步机制，请参考后面的联机游戏中注意事项部分。
-#### 3.3 联机游戏中注意事项
-- 如果你确定你的的数据不会影响游戏联机同步，其实完全不用看这个。  
-例如是数据的用途是玩家个性化的UI界面使用的相关配置数据，可以放心使用。  
-一般导致不同步的数据是再GameLua中不同玩家使用不同数据产生不同结果的情况，会导致不同步。
 
-首先，由于我的时间精力有限，我无法充足测试所有可能的联机游戏情况，因此，这里我只能尽量根据自己经验来进行设计。  
-所以这方面我非常需要大家的帮助，以及非常欢迎大家能给予我更好的建议。
+#### 3.3 联机数据的获取API
+- 已经在前面的'框架lua使用前言'中有说明，这里不再赘述
 
-> - 对于联机情况我的设计想法：  
-为了要避免避免造成可能的数据不同步，以及玩家的数据被其他玩家数据污染。
-因此，在联机的InGame环境不会进行保存数据的操作，既几个保存数据的API都不会工作。
-而是采用房主的数据为标准
-- 联机游戏有多种情况，又分房主和非房主情况，因此需要考虑多种情况，我们一点点来
-##### a. 房主玩家未启框架mod，但非房主玩家启用了框架mod
-如果你的mod是以框架为前置的，那么不用管这个了，你的mod和框架一起不工作了  
-
-如果你的mod在框架不存在的情况依然可以工作，既你计划采用默认数据，那么或许你可以直接在游戏内使用ExposedMembers缓存的数据作为默认值
-
-
-## 
-
-
-
-##### MLDM_ConfigUI两个相关事件zf
-- 是框架的配置UI相关的来个LuaEvent
-- 如果你需要个性化自己的配置UI，我想你很可能需要用到这两个事件
-- 例如你自己构建配置UI，插入到框架的配置UI中
-
-
-#### 2.跨UIlua使用
-- 在实际的mod中，我们经常会涉及多个lua文件，需要跨UIlua调用，例如可能需要在其他UI中显示一些mod配置数据，或者在其他UI中进行一些操作，那么框架提供了一些API来实现跨UIlua调用
-- 不知道你是否还记得前面ModDataIds的DataId，现在要用到它
-
-当你在其他UIlua脚本中需要获取自己mod数据时，可以调用如下API：
-LuaEvents.MLDM_GetModDataIds(DataId, key)
-
-
-
-
-
-
-
-
-
-
-
-
-
-#### 其他相通部分
-##### 你需要在modinfo文件中添加框架的依赖
-```Xml
-```
-
-#### Mod配置数据管理
-- 那么先来演示一下如何使用框架进行mod配置数据的管理部分
-- 需要现在注册默认参数
-```Lua
--- Lua 演示
-
-```
-
-
-<details>
-<summary></summary>
-
-</details>
-
-
-
-
-
-
-
-
-
-
-
-
-### 部分一：mod配置数据部分
-当一些mod数据作为这个mod面向玩家的设置时，推荐使用这个，框架为此提供便利的UI添加和数据更改存储，modder只需要框架这里注册对应的默认参数和对应的UI控件需求
-
-1.  第一步
-添加本地
-2.  
+最后，由于本框架的同步设计可能存在不完善之处，我们诚挚欢迎社区成员提供反馈和建议，以共同改进和优化同步机制。
