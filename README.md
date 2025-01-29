@@ -2,6 +2,8 @@
 ## 一. 文档信息
 - **作者：皮皮凯(PiPiKai)**
 - **时间：2025.1.20**
+- [Githup链接](https://github.com/X-PPK/CIV6-PKUIModDataGuide)
+- [Gitee链接](https://gitee.com/XPPK/pk-civ6-ModLocalDataFrameworkGuide)
 ---
 本文档旨在阐述《文明6》中皮凯UI框架mod下的“mod本地数据存储子框架”的使用方法。该框架允许每个mod拥有独立的持久化数据存储，这些数据能够跨游戏对局保存，存储于玩家的本地电脑中。以下提供的详细使用指南旨在帮助那些决定采用此框架的mod开发者们，能够轻松掌握并有效地运用这一工具。
 以下内容中提到的“框架”，均指该子框架部分。
