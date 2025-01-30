@@ -2,7 +2,7 @@
 ## 一. 文档信息
 - **作者：皮皮凯(PiPiKai)**
 - **时间：2025.1.20**
-- **版本：v1.2**
+- **版本：v1.0**
 - [Githup链接](https://github.com/X-PPK/CIV6-PKUIModDataGuide)
 - [Gitee链接](https://gitee.com/XPPK/pk-civ6-ModLocalDataFrameworkGuide)
 ---
