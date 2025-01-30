@@ -210,15 +210,137 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > ```
 > </details>
 
-### 3. 关于框架Mod数据保存
+### 3. MOD版本变更时对玩家既有数据的处理策略
+在MOD开发过程中，数据默认值及数据结构可能会因开发迭代而发生变化。同时，也可能存在MOD版本回退的情况。以下为框架针对此类情况的处理方法。
+
+#### 3.1 框架处理机制
+- 关于MOD数据的版本设置，在之前的“1. 框架引入”部分已有提及，具体是在SQLite数据库中的ModDataIds表中的Version字段进行定义。 
+
+当MOD数据版本发生更迭（包括升级和降级）时，框架默认采用新数据覆盖旧数据。然而，框架也为MOD开发者预留了自定义处理机制，以便在版本更迭时，能够提供更为灵活的处理手段。
+
+#### 3.2 自定义处理机制
+- 自定义处理机制主要通过MOD开发者提供的回调函数来实现。回调函数的具体规范如下：
+> ```lua
+> -- 注意升级的回调函数和降级的回调函数结构上是一样的，这里不分开说明
+> function CustomModDataVersionHandler(oldVersion, newVersion, oldData, newData)
+>   -- 处理Mod数据的版本更迭
+>   -- oldVersion: 旧版本号
+>   -- newVersion: 新版本号
+>   -- oldData: 存储的旧数据
+>   -- newData: 新版本的默认数据
+>
+>   -- 你的处理逻辑,省略...
+> 
+>   -- 框架会接收两个参数返回值：
+>   --   newNewData : 处理后的新数据
+>   --   isRequiredModToSets : 是文本变量(LOC_...)，用于是否提醒玩家mod配置发生更改需要重新设置mod的配置（仅用于Mod配置数据管理）
+>   return newNewData, isRequiredModToSets
+> end
+> -- 注册Mod数据版本更迭的回调函数，用于处理版本更迭的回调函数(可以分为两个函数，也可以合并为一个函数，当然也可以不注册回调函数)
+> MLDM.ModUpdateHashrs[modKey] = CustomModDataVersionHandler -- 注册Mod数据版本升级的回调函数，用于处理版本升级的回调函数
+> MLDM.ModRollbackHashs[modKey] = CustomModDataVersionHandler -- 注册Mod数据版本回退降级的回调函数，用于处理版本回退降级的回调函数
+> ```
+
+> <details><summary>部分相关源码</summary>
+>
+> ```lua
+>           if newModConfig ~= {} then
+>             for k, v in pairs(newModConfig) do
+>               newModVersions[k] = newModVersions[k] or 0
+>               if not self.IgnoreModVersionUpdates[k] then
+>                 if oldModConfig[k] then -- 对比保存的数据, 确认是否需要更新
+>                   if newModVersions[k] > oldModVersions[k] then
+>                     if self.ModUpdateHashrs[k] then -- 如果该mod存在modder自定义的数据调整方案, 则按这个方案调整
+>                       -- 需要返回修改后的数据和是否需要提醒玩家重新配置数据(如果是需要调配的mod)
+>                       oldModConfig[k], self.RequiredModToSets[k]  = self.ModUpdateHashrs[k](oldModVersions[k], newModVersions[k], oldModConfig[k], newModConfig[k])
+>                     else
+>                       -- -- 默认新的版本数据覆盖旧的数据, 既CurrentlyModDatas[k]当前版本既默认值，所以无需调整，只用标记
+>                       self.RequiredModToSets[k] = 'LOC_PK_CIV6_MLDM_LEFT_BUTTION_NEW_TT_0' -- 标记以便提醒玩家需要重新调整该mod的配置(如果是需要调配的mod)
+>                     
+>                       oldModConfig[k] = v -- 反转数据, 新的mod数据覆盖旧的mod数据
+>                     end
+>                   elseif newModVersions[k] < oldModVersions[k] then
+>                     if self.ModRollbackHashs[k] then -- 如果该mod存在modder自定义的回退版本方案, 则按这个方案调整
+>                       -- 需要返回修改后的数据和是否需要提醒玩家重新配置数据(如果是需要调配的mod)
+>                       oldModConfig[k], self.RequiredModToSets[k] = self.ModRollbackHashs[k](oldModVersions[k], newModVersions[k], oldModConfig[k], newModConfig[k]) -- 需要返回修改后的数据和是否需要提醒玩家重新配置数据
+>                     else
+>                       -- -- 默认恢复为旧版本默认数据既CurrentlyModDatas[k]当前版本既默认值，所以无需调整，只用标记
+>                       self.RequiredModToSets[k] = 'LOC_PK_CIV6_MLDM_LEFT_BUTTION_NEW_TT_1' -- 标记以便提醒玩家需要重新调整该mod的配置(如果是需要调配的mod)
+>                       oldModConfig[k] = v -- 反转数据, 新的mod数据覆盖旧的mod数据
+>                     end
+>                   else
+>                     -- 不需要更新的mod数据则保持原有的数据
+>                     -- self.CurrentlyModDatas[k] = oldModConfig[k] -- 反转这里已经是oldModConfig[k]
+>                   end
+>                 else
+>                   self.RequiredModToSets[k] = 'LOC_PK_CIV6_MLDM_LEFT_BUTTION_NEW_TT_2' -- 提醒玩家这个mod是新增加的，建议根据需要进行自定义配置(如果是需要调配的mod)
+>                   table.insert(ModHashRecord, k) -- 添加新的ModHash到记录表中
+>                   oldModConfig[k] = v -- 添加新的mod数据
+>                 end
+>               else
+>                 self.RequiredModToSets[k] = 'LOC_PK_CIV6_MLDM_LEFT_BUTTION_NEW_TT_3' -- 提醒modder这个mod还处于调试的mod状态
+>                 oldModConfig[k] = v -- 调控模式使用保持最新的mod默认数据，不使用之前存储的数据
+>               end
+>               -- 最后更新最新mod版本
+>               oldModVersions[k] = newModVersions[k] -- 添加新的mod版本
+>             end
+>           end
+> 
+>           self.CurrentlyModDatas = oldModConfig
+>           self.ModVersions = oldModVersions
+>           
+>           -- 存储最新的ModHashRecord和ModVersions
+>           self.CurrentlyModDatas[m_CoreModKey].ModHashRecord = ModHashRecord
+>           self.CurrentlyModDatas[m_CoreModKey].ModVersions = oldModVersions -- 保存最新的版本
+> ```
+> </details>
+
+### 4. 关于框架Mod数据保存
+由于所有mod数据都存储在一个配置存档中，频繁的保存操作可能会影响性能和游戏体验，因此建议减少不必要的频繁保存。
+#### 4.1 框架的保存机制
 - **配置数据**：对于通过"Add...ParamUI" API注册的配置数据，框架会自动保存玩家所做的更改。  
 - **非配置数据**：非配置数据的保存则需要根据环境不同而有所不同。
   - **前端环境**：在所有数据更改完成后，需要手动调用保存数据的API。
   - **游戏内(InGame)环境**：框架会在保存游戏存档时自动保存所有mod数据，同时也提供了主动保存的API。
 
-由于所有mod数据都存储在一个配置存档中，频繁的保存操作可能会影响性能和游戏体验，因此建议减少不必要的频繁保存。
+#### 4.2 数据保存原理和存储文件
+- **具体原理概述**：使用GameConfiguration.SetValue来以‘配置参数’的形式存储在配置存档，并将配置存档保存到玩家本地。在下次启动游戏时加载配置存档后读取出这些数据(GameConfiguration.GetValue)
+- **存储文件**：默认保存文件名为‘PKUI_ModData.Civ6Cfg’,一般位于C:\Users\[Your username]\Documents\My Games\Sid Meier's Civilization VI\Saves\Single
 
-### 4. 关于网络多人联机数据同步问题
+如何更改默认命名：(Mod的MyModDataFileNameX.lua文件有讲内容如下)
+```lua
+-- === Mod数据存储文件名 === --
+-- 若您希望自定义Mod数据存储的配置存档名称，请修改以下变量DefaultModDataFileName的值。
+-- 需要注意的是，修改后请将文件名后面的大写字母“X”去掉。
+-- 例如，将文件名从“MyModDataFileNameX”更改为“MyModDataFileName”。
+
+-- === Mod Data Storage Filename === --
+-- If you wish to customize the name of the configuration archive for mod data storage, please modify the value of the variable DefaultModDataFileName below.
+-- Note that after making the change, you should remove the uppercase letter "X" from the end of the filename.
+-- For example, change the filename from “MyModDataFileNameX” to “MyModDataFileName”.
+DefaultModDataFileName = "PKUI_ModData"
+
+-- 重要提示：
+-- 1. 更改文件名后，该文件将不会随Mod更新而更新。
+-- 2. 如果您取消订阅该Mod或卸载文明6，此文件不会被自动删除，需要您手动操作。
+-- 3. 若您只是暂时不玩文明6而卸载游戏，建议保留此文件，以免忘记Mod数据存档的文件名称。
+-- 4. 如果您计划长期不玩文明6，建议备份此文件，以记录您的Mod数据配置存档名（.Civ6Cfg）。
+-- 5. 同时，请确保备份对应的Mod数据配置存档文件（.Civ6Cfg），以免数据丢失。
+-- 6. 一般Mod数据配置存档文件（.Civ6Cfg）位于C:\Users\[Your username]\Documents\My Games\Sid Meier's Civilization VI\Saves\Single
+
+-- Important Notes:
+-- 1. After changing the filename, this file will not be updated with mod updates.
+-- 2. If you unsubscribe from this mod or uninstall Civilization VI, this file will not be deleted automatically and will require manual action from you.
+-- 3. If you are only uninstalling Civilization VI temporarily and not planning to play, it is recommended to keep this file to avoid forgetting the filename of the mod data archive.
+-- 4. If you are planning to take an extended break from playing Civilization VI, it is advised to back up this file to keep a record of your mod data configuration archive name (.Civ6Cfg).
+-- 5. Also, please make sure to back up the corresponding mod data configuration archive file (.Civ6Cfg) to prevent data loss.
+-- 6. Generally, the mod data configuration archive file (.Civ6Cfg) is located at C:\Users[Your username]\Documents\My Games\Sid Meier's Civilization VI\Saves\Single
+
+```
+
+
+
+### 5. 关于网络多人联机数据同步问题
 **数据影响评估**：Mod开发者应评估自己Mod数据使用中，是否会影响游戏联机同步。例如，仅用于玩家个性化自我展示的UI界面的配置数据不会影响同步，而Game环境Lua中不同玩家使用的数据则可能导致同步问题。
 
 **官方API利用**：对于可能引起同步问题的数据，我们推荐使用官方API `UI.RequestPlayerOperation` 来确保数据的一致性。此API能够处理大多数同步需求。
@@ -495,7 +617,8 @@ local playerModSyncData = deserialize(playerModSyncDataStr) -- deserialize函数
 > ```
 > </details>
 
-### 5. 如何在Lua脚本中使用框架数据
+
+### 6. 如何在Lua脚本中使用框架数据
 有多种方式可以在Lua脚本中使用框架数据，以下是一些关键参数的说明：
   - modUUID：mod的唯一标识，既你的Mod的modinfo文件中的ModId
   - modKey：mod的本地数据存储key，是由modUUID生成的唯一对应的字符串
