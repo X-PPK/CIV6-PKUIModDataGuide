@@ -2,12 +2,17 @@
 ## 一. 文档信息
 - **作者：皮皮凯(PiPiKai)**
 - **时间：2025.1.20**
-- **版本：v1.0**
+- **版本：v1.1**
 - [Githup链接](https://github.com/X-PPK/CIV6-PKUIModDataGuide)
 - [Gitee链接](https://gitee.com/XPPK/pk-civ6-ModLocalDataFrameworkGuide)
 ---
 本文档旨在阐述《文明6》中皮凯UI框架mod下的“mod本地数据存储子框架”的使用方法。该框架允许每个mod拥有独立的持久化数据存储，这些数据能够跨游戏对局保存，存储于玩家的本地电脑中。以下提供的详细使用指南旨在帮助那些决定采用此框架的mod开发者们，能够轻松掌握并有效地运用这一工具。
-以下内容中提到的“框架”，均指该子框架部分。
+以下内容中提到的“框架”，均指该子框架部分。  
+
+框架的脚本文件名为：`ModLocalDataManager.lua`  
+
+**重要提示**：本指南编制之初，基于框架（mod）1.0版本。目前，mod已更新至1.1版本。尽管指南这里大部分内容已同步更新，但部分次要信息仍基于1.0版本，尤其是涉及引用的框架源码部分。为确保准确性，请以mod当前实际代码为准。
+
 > 感谢以下人员对本框架的帮助 : (根据拼音首字母/字母排序)
 > - 感谢'[atts.leo](https://steamcommunity.com/profiles/76561199589258333)' 非常有耐心陪伴我测试联机，研究游戏联机相关的API。如果没有他的帮助，我恐怕难以解决框架的数据同步问题。
 > - 感谢'[号码菌Synora](https://steamcommunity.com/profiles/76561198147378701)' 帮我解答了一些技术难题，减少了我研究联机同步时验证官方API的时间，让我能更高效地推进项目进度。
@@ -17,9 +22,13 @@
 
 ## 二. 框架设计概述
 本部分将介绍框架的设计原因和优势，帮助理解其核心功能和目的。
-### 1. 数据存储/读取方式
+### 1. 数据管理方式
 - **集中存储**：框架采用集中式数据存储机制，所有mod数据均存储在一个“配置存档”中。游戏启动并进入主菜单时，框架会自动读取该“配置存档”中的数据。
-- **数据读取**：读取的数据会被同步至相应的Lua脚本变量，确保让使用框架的mod获取正确的数据。同时，框架会生成LuaEvents和ExposedMembers等API，以便mod开发者能够便捷地在其他lua脚本中进行数据操作。
+- **数据读取**：读取的数据会被同步至相应的Lua脚本变量，确保让使用框架的mod获取正确的数据。同时，框架会生成LuaEvents等API，以便mod开发者能够便捷地在其他lua脚本中进行数据操作。
+- **数据缓存机制**：由于数据只能在前端环境中安全读取，框架在前端获取数据后会进行缓存，以便在其他时刻能够及时获取数据。数据从“配置存档”中读取后，会先缓存到框架的Lua脚本中，随后缓存到ExposedMembers.ModDataCache中（注意：这里'ExposedMembers.ModDataCache'主要用于将数据传递到InGame环境，而非供其他Lua脚本直接使用，开发者应通过框架API获取数据）。
+- **缓存清理机制**：为了避免多个mod的数据占用过多内存，框架会清理不必要的mod数据。具体策略如下：
+  - 如果mod的部分数据仅在前端环境中使用，进入InGame后应立即清理这部分缓存。
+  - 对于未激活的mod，它的数据，框架会在进入InGame后清理，但考虑到玩家可能在InGame中加载其他mod，有可能需要自己的数据，所以此功能将作为可选设置供玩家决定。
 ### 2. 设计框架管理缘由
 - **避免冲突**：若每个mod各自使用独立的“配置存档”，则不仅会增加数据读取时间，还可能在加载时发生冲突，因为同一时间只能加载/保存一个配置存档。
 - **减小存储占用**：由于“配置存档”包含大量非必要的其他数据，若每个mod单独存储，将浪费存储空间。集中存储可以有效利用空间。
@@ -49,12 +58,17 @@
 - **功能定位**：这部分负责处理mod的非配置数据，即那些不直接暴露给玩家设置的数据。
 - **API提供**：框架同样提供了设置默认值、更改数据和保存数据的API，但与配置数据不同的是，这些数据的具体操作需要mod开发者自行定义和实现。
 - **自定义操作**：开发者可以根据mod的具体需求，定义数据的存储、更改等操作。例如，可以用于记录领袖的挑战进度、实现跨存档的能力解锁等，为开发者提供了极大的灵活性和创造空间。
-通过这种结构设计，框架既能够满足玩家对配置数据自定义的需求，又能够为mod开发者提供处理复杂游戏状态的强大工具，从而共同提升游戏体验和扩展游戏的可玩性。
 ### 3. 框架中Mod数据的结构
-- **数据结构**：框架本质是Lua表，CurrentlyModDatas子表负责存储当前所有mod的数据。每个使用框架的mod在CurrentlyModDatas中都有一个{_localData={}, _snycData={}}结构的子表，用于存储数据，并且这个子表拥有元表属性。
-- **元表属性**：该表的元表属性允许以表为对象添加参数，自动根据键值分配到_localData或_snycData中。例如，当设置CurrentlyModDatas[modkey][key] = value时，若键以"_"开头，则自动分配到_snycData；否则分配到_localData。具体细节后续会详细讲解
+- **数据结构**：框架本质是Lua表，CurrentlyModDatas子表负责存储当前所有mod的数据。每个使用框架的mod在CurrentlyModDatas中都有一个{_localData={}, _snycData={}, _FrontData={}}结构的子表，用于存储数据，并且这个子表拥有元表属性。
+- **元表属性**：该表的元表属性允许以表为对象添加参数，自动根据键值分配到_localData或_snycData中。例如，当设置CurrentlyModDatas[modkey][key] = value时：
+  - 若键以"_"开头，则自动分配到_snycData；
+  - 若键以"f"开头，则自动分配到_FrontData；
+  - 否则分配到_localData。
 - **_snycData**：存储需要在联机游戏中同步的数据。框架在联机游戏中自动同步这些数据，具体操作将在后续联机指南中详细讲解。
-- **_localData**：存储无需同步的数据。框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步，
+- **_FrontData**：存储纯前端的数据。这部分数据会再对局游戏开始（即进入InGame）时被清除。
+- **_localData**：存储无需同步的数据。框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步。
+
+通过这种结构设计，希望框架既能够满足玩家对配置数据自定义的需求，又能够为mod开发者提供处理复杂游戏状态的强大工具，从而共同提升游戏体验和扩展游戏的可玩性。
 
 ---
 
@@ -64,7 +78,8 @@
 框架的数据操作是在游戏的UI-lua环境中进行的，因此需要使用UI Lua来操作数据。  
 ### 1. 框架引入
 首先，确保您的模组（mod）向框架注册。需要在游戏数据库中填写ModDataIds表，这是至关重要的，原因如下：
-- **避免ID冲突**：因为直接在Lua中添加参数可能导致不同mod使用相同ID，从而引起干扰。通过在SQLite数据库中实施ModId和DataId的唯一性约束，可以在数据插入阶段进行初步的ID检查，有效避免潜在的冲突。
+- **避免ID冲突**：因为直接在Lua中添加参数可能导致不同mod使用相同ID，从而引起干扰。通过在SQLite数据库中实施**ModId**和**DataId**的唯一性约束，可以在数据插入阶段进行初步的ID检查，有效避免潜在的冲突。
+- **注意事项**：您填写的**ModDataIds**表的SQL/XML文件需要在mod的**modinfo**文件中分别在**FrontEndActions**和**InGameActions**中设置**UpdateDatabase**以添加该文件。这是因为框架是跨越前端和InGame环境的mod。
 
 以下是在数据库中插入ModDataIds的SQL和XML示例：
 
@@ -103,31 +118,32 @@ INSERT INTO ModDataIds (ModId, DataId, Version) VALUES
 ---
 
 ### 2. Mod数据表及键值规范
-- 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}}, 以下简称该结构为“Mod数据表”。
+- 框架会为每个使用框架的mod 提供一个预设的数据表结构{_localData={}, _snycData={}, _FontData={}}, 以下简称该结构为“Mod数据表”。
 - Mod数据表存储于框架的 CurrentlyModDatas 子表中，键值是由 ModUUID 生成唯一的字符串标识 ModKey。
 - 可以通过框架直接访问Mod数据：MLDM.CurrentlyModDatas[modKey]。
 > **命名规范要点**：mod开发者在使用Mod数据表进行键值赋值时，必须遵循以下命名规则： (原因参考下面给与mod数据表的元表属性) 
 > - 键值前缀规范:  
 >   - 若键值以“_”开头，则自动分配到_snycData，即同步数据, 框架在联机游戏中自动同步这些数据。  
 >   - 若键值不以“_”开头，自动分配到_localData，即非同步数据, 框架不会自动同步这些数据，但如有需要，开发者可以通过框架API手动进行同步。 
+>   - 若键值以“f”开头，则自动分配到_FrontData，即前端数据，框架在游戏开始时会清除该数据缓存，不影响该数据的存储。  
 > - 禁止使用的键值：   
->   - 请勿使用“_localData”或“_syncData”作为键值，除非您的意图是直接修改Mod数据表的 _localData 和 _syncData 子表本身。  
+>   - 请勿使用“_localData”或“_syncData”或“_FrontData”作为键值，除非您的意图是直接修改Mod数据表的 _localData 或 _syncData 或 _FrontData 子表本身。  
 > - 保持Mod数据表结构：  
->   - 如果您确实需要替换 _localData 或 _syncData 子表，请确保不改变它们的数据类型。维持正确的数据类型是确保元表属性正常运作的关键。
+>   - 如果您确实需要替换 _localData 或 _syncData 或 _FrontData 子表，请确保不改变它们的数据类型。维持正确的数据类型是确保元表属性正常运作的关键。  
 >   - 不要使用rawset添加赋值,它会忽略元表的__newindex元方法，直接赋值到Mod数据表，会有潜在键值相同导致数据更改/获取错误。
 >  
 > 遵守以上规范将有助于确保Mod数据表的功能性和稳定性，避免潜在的运行时错误。
 
-Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表结构。以下为具体实现示例：
+Mod数据表具备元表属性，实现了 _localData, _FrontData 和 _syncData 的隐性表结构。以下为具体实现示例：
 > <details><summary>Mod数据表的元表-应用例子</summary>
 > 
 > ```lua
 > local modData = MLDM.CurrentlyModDatas[modKey]
 > 
 > -- 以下是对modData的操作
-> modData['key1'] = 'value1' -- 会自动分配到_localData，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+> modData['key1'] = 'value1' -- 会自动分配到_localData，此时modData = {_localData={key1 = 'value1'}, _snycData={}, _FrontData={}}
 > print(modData['key1']) -- 直接输出 'value1'
-> modData['_key1'] = 'value2' -- 会自动分配到_snycData，此时modData = {_localData={key1 = 'value1'}, _snycData={_key1 = 'value2'}}
+> modData['_key1'] = 'value2' -- 会自动分配到_snycData，此时modData = {_localData={key1 = 'value1'}, _snycData={_key1 = 'value2'}, _FrontData={}}
 > print(modData['_key1']) -- 直接输出 'value2'
 > -- 当你想要遍历自己modData时，不要直接使用 pairs
 > for k, v in pairs(modData) do
@@ -149,7 +165,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > print(table.count(modData)) -- 输出 2 同上,是_localData和_snycData这两个元素的数量
 > print(table.count(modData(true))) -- 输出 3 会获得_localData子表和_snycData子表的总数量
 >
-> modData['_snycData'] = {} -- 直接修改_snycData子表，清空原有同步表数据，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+> modData['_snycData'] = {} -- 直接修改_snycData子表，清空原有同步表数据，此时modData = {_localData={key1 = 'value1'}, _snycData={}, _FrontData={}}
 >
 > -- 下面是错误的示范1：
 > -- 不要这样作 因为_syncData和_localData是框架预留的关键字，它的在mod数据表中的类型应当是表
@@ -158,9 +174,9 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 > modData['key3'] = {1,2,3}
 >
 > -- 下面是错误的示范2：
-> modData['_localData'] = {key1 = 'value1'} -- 先恢复正确的mod数据表，此时modData = {_localData={key1 = 'value1'}, _snycData={}}
+> modData['_localData'] = {key1 = 'value1'} -- 先恢复正确的mod数据表，此时modData = {_localData={key1 = 'value1'}, _snycData={}, _FrontData={}}
 > -- 不要使用rawset来赋值，因为这样会忽略元表的__newindex元方法，直接赋值到Mod数据表，会有潜在键值相同导致数据更改错误
-> rawset(modData, 'key1', 'value0') -- 此时 modData = {_localData={key1 = 'value1'}, _snycData={}, key1 = value0}
+> rawset(modData, 'key1', 'value0') -- 此时 modData = {_localData={key1 = 'value1'}, _snycData={}, key1 = value0, _FrontData={}}
 > print(modData['key1']) -- 输出 'value0' ,键值查询也不会调用__index元方法
 > ```
 > </details>
@@ -168,6 +184,7 @@ Mod数据表具备元表属性，实现了 _localData 和 _syncData 的隐性表
 此设计旨在简化数据管理，同时兼顾联机模式下的同步数据快速管理以及单机模式下的数据统一管理。
 > <details><summary>元表源码</summary>
 > 
+> **注意**：这里是老的版本，最新的请看框架mod的PK_MetaTableUtility.lua文件
 > - 我在PK_MetaTableUtility.lua设置两种元表如果有需要可以去include使用
 > - 这也是一个很好的学习lua元表的例子(给lua萌新的建议)
 > - 一种数据管理方案，直接根据键值不同对数据进行分配，同时又能兼顾整体数据（好吧跑题了，哈哈）
